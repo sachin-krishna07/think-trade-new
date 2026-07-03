@@ -15,8 +15,8 @@ import core.supabase_client as db
 
 log = logging.getLogger("trade_engine")
 
-# Binance Futures taker fee: 0.04%
-TAKER_FEE_RATE = 0.04 / 100
+# Binance Futures taker fee: 0.05% per side (raised from 0.04% on 2026-07-03)
+TAKER_FEE_RATE = 0.05 / 100
 
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
@@ -400,7 +400,7 @@ class TradeEngine:
             sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
 
-        # Entry fee (taker 0.05% + 18% GST) on position size
+        # Entry fee (taker 0.05%) on position size
         entry_fee    = sizing["position_size_usd"] * TAKER_FEE_RATE
         total_fee_est = entry_fee * 2  # entry + exit
 

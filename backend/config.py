@@ -10,30 +10,27 @@ BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 
 # ─── Pairs: display name → Binance symbol ───────────────────
+# Blocklisted 2026-07-03 from 2.0 trade history (295 trades, 19-30 Jun):
+# SUI(-$12.3k), NEAR(-$5.3k), TON(22% WR), OP(14% WR), POL(33% WR),
+# HBAR(0% WR), NOT(25% WR), ARB(-$6.2k in 3.0). Re-run pair analysis
+# monthly before re-adding.
 PAIRS = {
     # ⭐ TIER 1
     "JUP":   "JUPUSDT",
-    "NEAR":  "NEARUSDT",
-    "SUI":   "SUIUSDT",
     "STX":   "STXUSDT",
-    "OP":    "OPUSDT",
     "DOGE":  "DOGEUSDT",
     "WIF":   "WIFUSDT",
     "SOL":   "SOLUSDT",
-    "NOT":   "NOTUSDT",
     "APT":   "APTUSDT",
 
     # ✅ TIER 2
-    "TON":   "TONUSDT",
     "ADA":   "ADAUSDT",
     "AVAX":  "AVAXUSDT",
-    "ARB":   "ARBUSDT",
     "TIA":   "TIAUSDT",
     "ICP":   "ICPUSDT",
     "BTC":   "BTCUSDT",
     "ETH":   "ETHUSDT",
     "LINK":  "LINKUSDT",
-    "HBAR":  "HBARUSDT",
 
     # 👀 TIER 3
     "DOT":   "DOTUSDT",
@@ -52,7 +49,31 @@ PAIRS = {
     "WLD":   "WLDUSDT",
     "BONK":  "BONKUSDT",
     "BCH":   "BCHUSDT",
-    "POL":   "POLUSDT",
+
+    # 🧪 PROBATION (added 2026-07-03, no trade history yet —
+    # judge after ~20 trades each, same win-rate/net-pnl analysis)
+    "XRP":   "XRPUSDT",
+    "LTC":   "LTCUSDT",
+    "INJ":   "INJUSDT",
+    "AAVE":  "AAVEUSDT",
+    # market-profile screened 2026-07-03: matched proven winners' volatility
+    # (5m ATR 0.22-0.60%), trendiness and liquidity; all verified TRADING on
+    # Binance spot + USDT-M perpetual futures.
+    "ZEC":    "ZECUSDT",
+    "XLM":    "XLMUSDT",
+    "PENDLE": "PENDLEUSDT",
+    "MORPHO": "MORPHOUSDT",
+    "ME":     "MEUSDT",
+    "FF":     "FFUSDT",
+    "FIL":    "FILUSDT",
+    "TRUMP":  "TRUMPUSDT",
+    "PENGU":  "PENGUUSDT",
+    "ORDI":   "ORDIUSDT",
+    "BERA":   "BERAUSDT",
+    "RENDER": "RENDERUSDT",
+    "RED":    "REDUSDT",
+    "DASH":   "DASHUSDT",
+    "CRV":    "CRVUSDT",
 }
 
 BINANCE_WS_BASE  = "wss://stream.binance.com:9443/stream"
@@ -69,7 +90,10 @@ SCALPING = {
     "atr_sl_mult":       1.35,
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
-    "min_adx":           20,              # lowered from 25 — 25 was blocking valid trends (e.g. ADX 24.3)
+    "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
+                                           # trades: ADX 18-22 zone lost -$26,598 (38-44% WR), ADX 22+
+                                           # made +$23,661 (52-62% WR). 20 was too loose; 25 too tight
+                                           # (24-27 bucket was ~breakeven). 22 is the actual breakpoint.
     "rsi_period":        5,
     "rsi_oversold":      25,              # slightly relaxed from 20 — RSI rarely hits 20 on 5m
     "rsi_overbought":    75,              # slightly relaxed from 80 — catch overbought earlier

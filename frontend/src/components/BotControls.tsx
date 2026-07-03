@@ -2,15 +2,21 @@ import { useState, useEffect } from "react";
 import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
 
+// Blocklisted 2026-07-03 (2.0 trade data): SUI, NEAR, TON, OP, POL, HBAR, NOT, ARB
 const ALL_PAIRS = [
   // ⭐ TIER 1
-  "JUP", "NEAR", "SUI", "STX", "OP", "DOGE", "WIF", "SOL", "NOT", "APT",
+  "JUP", "STX", "DOGE", "WIF", "SOL", "APT",
   // ✅ TIER 2
-  "TON", "ADA", "AVAX", "ARB", "TIA", "ICP", "BTC", "ETH", "LINK", "HBAR",
+  "ADA", "AVAX", "TIA", "ICP", "BTC", "ETH", "LINK",
   // 👀 TIER 3
   "DOT", "ATOM", "EIGEN", "UNI", "RUNE", "SEI", "PEPE",
   // 🔬 TIER 4
-  "TAO", "ONDO", "ENA", "FET", "WLD", "BONK", "BCH", "POL",
+  "TAO", "ONDO", "ENA", "FET", "WLD", "BONK", "BCH",
+  // 🧪 PROBATION (new — no history yet, judge after ~20 trades)
+  "XRP", "LTC", "INJ", "AAVE",
+  // market-profile screened 2026-07-03 (winner-matched volatility/trend/liquidity)
+  "ZEC", "XLM", "PENDLE", "MORPHO", "ME", "FF", "FIL", "TRUMP",
+  "PENGU", "ORDI", "BERA", "RENDER", "RED", "DASH", "CRV",
 ];
 
 interface Props {
@@ -30,7 +36,12 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   const [mode, setMode]             = useState(() => localStorage.getItem("bot_mode") || "demo");
   const [style, setStyle]           = useState(() => localStorage.getItem("bot_style") || "scalping");
   const [pairs, setPairs]           = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("bot_pairs") || "null") || ALL_PAIRS; }
+    try {
+      const saved = JSON.parse(localStorage.getItem("bot_pairs") || "null") as string[] | null;
+      // Drop blocklisted coins that may still be cached from before
+      const valid = saved?.filter((p) => ALL_PAIRS.includes(p));
+      return valid && valid.length > 0 ? valid : ALL_PAIRS;
+    }
     catch { return ALL_PAIRS; }
   });
   const [capitalPct, setCapitalPct] = useState(() => localStorage.getItem("bot_capital") || "1");

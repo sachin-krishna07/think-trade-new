@@ -9,7 +9,7 @@ import {
 import {
   TrendingUp, TrendingDown, Target, Zap,
   Trophy, AlertTriangle, CheckCircle, Info,
-  BarChart2, Activity, Clock,
+  BarChart2, Activity, Clock, Coins,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -31,6 +31,7 @@ interface Trade {
   pnl: number;
   net_pnl: number;
   r_multiple: number;
+  fee: number;
   signals_at_entry: any;
   pair: string;
   direction: string;
@@ -119,7 +120,7 @@ export default function Analytics() {
     setLoading(true);
     let query = supabase
       .from("trades")
-      .select("pnl, net_pnl, r_multiple, signals_at_entry, pair, direction, exit_reason, created_at, style, signal_score")
+      .select("pnl, net_pnl, r_multiple, fee, signals_at_entry, pair, direction, exit_reason, created_at, style, signal_score")
       .eq("mode", m).eq("status", "closed")
       .order("created_at", { ascending: true })
       .limit(2000);
@@ -154,6 +155,7 @@ export default function Analytics() {
     const wins  = trades.filter(t => t.pnl > 0).length;
     const totalPnl = trades.reduce((s, t) => s + (t.net_pnl || t.pnl || 0), 0);
     const totalR   = trades.reduce((s, t) => s + (t.r_multiple || 0), 0);
+    const totalFees = trades.reduce((s, t) => s + (t.fee || 0), 0);
     const wr = winRate(wins, total);
     const ar = avgR(totalR, total);
 
@@ -254,7 +256,7 @@ export default function Analytics() {
       if (bestCombo && bestCombo.wr >= 65 && bestCombo.total >= 3) insights.push({ type: "good", text: `Best combo ${bestCombo.combo} — ${bestCombo.wr}% win rate (${bestCombo.total} trades)` });
     }
 
-    return { total, wins, totalPnl, wr, ar, equity, pairStats, dirMap, exitStats, scoreData, comboStats, insights };
+    return { total, wins, totalPnl, totalFees, wr, ar, equity, pairStats, dirMap, exitStats, scoreData, comboStats, insights };
   }, [trades]);
 
   const equityUp = stats.totalPnl >= 0;
@@ -495,7 +497,7 @@ export default function Analytics() {
           <div className="p-4 space-y-4">
 
             {/* ── KPI Hero Cards ──────────────────────────── */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
 
               {/* Total Trades */}
               <div className="relative bg-[#0d1117] border border-[#1e2433] rounded-2xl p-5 group hover:border-indigo-500/40 transition-colors duration-300 min-h-[130px]">
@@ -569,6 +571,26 @@ export default function Analytics() {
                     {equityUp ? "+" : ""}{fmtINR(stats.totalPnl, 0)}
                   </div>
                   <div className="text-[11px] text-gray-600 mt-2.5">after all fees</div>
+                </div>
+              </div>
+
+              {/* Total Fees */}
+              <div className="relative bg-[#0d1117] border border-[#1e2433] rounded-2xl p-5 group hover:border-amber-500/40 transition-colors duration-300 min-h-[130px]">
+                <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl bg-gradient-to-r from-transparent via-amber-500/70 to-transparent" />
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-amber-500/[0.06] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Total Fees</span>
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors duration-300">
+                      <Coins size={14} className="text-amber-400" />
+                    </div>
+                  </div>
+                  <div className="text-3xl font-black tracking-tight leading-none text-amber-400">
+                    {fmtINR(stats.totalFees, 0)}
+                  </div>
+                  <div className="text-[11px] text-gray-600 mt-2.5">
+                    ~{fmtINR(stats.total > 0 ? stats.totalFees / stats.total : 0, 0)} per trade
+                  </div>
                 </div>
               </div>
 
