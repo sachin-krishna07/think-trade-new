@@ -129,10 +129,9 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        0.75,  # actual SL placed at 0.75x the 1.35xATR risk distance —
-                                 # 1R (risk_amount, used for R-multiple + trailing ladder)
-                                 # still anchored to the full atr_sl_mult distance, so an
-                                 # SL-out now reports -0.75R instead of -1.00R.
+    "sl_entry_r":        1.0,   # reverted 2026-07-10 — back to full 1R stop (was 0.75x,
+                                 # tried tighter but reverted per user request). SL-out
+                                 # now reports -1.00R again.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping

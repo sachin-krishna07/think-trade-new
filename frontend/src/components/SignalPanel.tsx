@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { SignalData } from "@/hooks/useBotSocket";
 
 interface Props {
@@ -196,7 +197,12 @@ function PairSignalCard({ pair, sig }: { pair: string; sig?: SignalData }) {
 }
 
 export default function SignalPanel({ signals, selectedPairs, running, knownPairs }: Props) {
-  const signalPairs = selectedPairs?.length ? selectedPairs : Object.keys(signals);
+  const basePairs = selectedPairs?.length ? selectedPairs : Object.keys(signals);
+  // Highest signal score first — cards climb up as their score rises and
+  // sink back down as it falls. Pairs with no data yet sort to the bottom.
+  const signalPairs = [...basePairs].sort(
+    (a, b) => (signals[b]?.total_score ?? -1) - (signals[a]?.total_score ?? -1)
+  );
 
   if (running && signalPairs.length === 0) {
     const skeletonPairs = knownPairs && knownPairs.length > 0 ? knownPairs : null;
@@ -229,7 +235,9 @@ export default function SignalPanel({ signals, selectedPairs, running, knownPair
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
       {signalPairs.map((p) => (
-        <PairSignalCard key={p} pair={p} sig={signals[p]} />
+        <motion.div key={p} layout transition={{ duration: 0.4, ease: "easeInOut" }}>
+          <PairSignalCard pair={p} sig={signals[p]} />
+        </motion.div>
       ))}
     </div>
   );

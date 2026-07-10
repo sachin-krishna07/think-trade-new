@@ -363,8 +363,12 @@ class SignalEngine:
         # Price must be near EMA-9 on entry TF before any trade.
         # Long:  price pulled back near EMA-9 from above (dip before resume up)
         # Short: price bounced near EMA-9 from below (pop before resume down)
-        # Also checks: EMA not flat, EMA not broken in last 5 candles
-        pullback_ok = ema_pullback(e_closes, direction, period=9, tolerance_pct=0.0075)
+        # Also checks: EMA not flat, EMA not broken in last 5 candles, and (via
+        # atr_value) rejects single-candle spike/crash traps as fake pullbacks
+        pullback_ok = ema_pullback(
+            e_closes, e_highs, e_lows, direction,
+            atr_value=result.atr_value, period=9, tolerance_pct=0.0075,
+        )
         result.ema_pullback = 1 if pullback_ok else 0
 
         if score >= MIN_SIGNAL_SCORE and quality_ok and pullback_ok:
