@@ -393,11 +393,15 @@ class TradeEngine:
         sl_dist   = sizing["sl_distance"]
         tp_dist   = sl_dist * (cfg["atr_tp_mult"] / cfg["atr_sl_mult"])
 
+        # Actual SL is placed tighter than the full 1R distance (risk_amount stays
+        # anchored to sl_dist, so an SL-out reports sl_entry_r, e.g. -0.75R, not -1.00R).
+        sl_entry_dist = sl_dist * cfg.get("sl_entry_r", 1.0)
+
         if direction == "long":
-            sl_price = entry_price - sl_dist
+            sl_price = entry_price - sl_entry_dist
             tp_price = entry_price + tp_dist
         else:
-            sl_price = entry_price + sl_dist
+            sl_price = entry_price + sl_entry_dist
             tp_price = entry_price - tp_dist
 
         # Entry fee (taker 0.05%) on position size
@@ -463,10 +467,10 @@ class TradeEngine:
                 if actual_fill > 0 and actual_fill != entry_price:
                     log.info(f"{pair}: Fill adjusted {entry_price:.6f} → {actual_fill:.6f} — recalculating SL/TP")
                     if direction == "long":
-                        sl_price = actual_fill - sl_dist
+                        sl_price = actual_fill - sl_entry_dist
                         tp_price = actual_fill + tp_dist
                     else:
-                        sl_price = actual_fill + sl_dist
+                        sl_price = actual_fill + sl_entry_dist
                         tp_price = actual_fill - tp_dist
                     entry_price = actual_fill
 
@@ -562,18 +566,19 @@ class TradeEngine:
         trailing_sl    = sl_price
 
         # (trigger_R, lock_R): when price hits trigger_R → SL moves to lock_R
-        # 1.0R → lock 0.75R immediately (no breakeven wait)
-        # Steps every ~0.3R, gap 0.25-0.30R throughout
+        # Steps every ~0.3R, gap 0.25-0.30R throughout. Shifted +0.1R across
+        # the board (2026-07-10) — same ladder shape, entered/locked slightly
+        # later.
         TRAIL_STEPS = [
-            (1.00, 0.75),   # 1.0R → lock 0.75R (gap: 0.25R)
-            (1.30, 1.00),   # 1.3R → lock 1.0R  (gap: 0.30R)
-            (1.50, 1.20),   # 1.5R → lock 1.2R  (gap: 0.30R)
-            (1.80, 1.50),   # 1.8R → lock 1.5R  (gap: 0.30R)
-            (2.10, 1.80),   # 2.1R → lock 1.8R  (gap: 0.30R)
-            (2.50, 2.20),   # 2.5R → lock 2.2R  (gap: 0.30R)
-            (3.00, 2.70),   # 3.0R → lock 2.7R  (gap: 0.30R)
-            (3.50, 3.20),   # 3.5R → lock 3.2R  (gap: 0.30R)
-            (4.00, 3.70),   # 4.0R → lock 3.7R  (gap: 0.30R)
+            (1.10, 0.85),   # 1.1R → lock 0.85R (gap: 0.25R)
+            (1.40, 1.10),   # 1.4R → lock 1.10R (gap: 0.30R)
+            (1.60, 1.30),   # 1.6R → lock 1.30R (gap: 0.30R)
+            (1.90, 1.60),   # 1.9R → lock 1.60R (gap: 0.30R)
+            (2.20, 1.90),   # 2.2R → lock 1.90R (gap: 0.30R)
+            (2.60, 2.30),   # 2.6R → lock 2.30R (gap: 0.30R)
+            (3.10, 2.80),   # 3.1R → lock 2.80R (gap: 0.30R)
+            (3.60, 3.30),   # 3.6R → lock 3.30R (gap: 0.30R)
+            (4.10, 3.80),   # 4.1R → lock 3.80R (gap: 0.30R)
         ]
 
 
@@ -681,8 +686,8 @@ class TradeEngine:
                 # ── Exit conditions ──────────────────────────────
                 exit_reason = None
 
-                # 4R → hard exit (profit booked)
-                if r_current >= 4.0:
+                # 4.1R → hard exit (profit booked) — matches the last TRAIL_STEPS trigger
+                if r_current >= 4.1:
                     exit_reason = "2r_target"
                 # Early stop — exit at -1.5R if no trailing step has triggered yet
                 elif r_current <= -1.5 and trail_step == 0:

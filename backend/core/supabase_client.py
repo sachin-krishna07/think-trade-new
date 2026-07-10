@@ -162,43 +162,6 @@ def count_losses_in_window(mode: str, window: int = 5) -> int:
         .execute()
     return sum(1 for r in (result.data or []) if r["pnl"] is not None and r["pnl"] < 0)
 
-def get_loss_window_info(mode: str, window: int = 5):
-    """Return (loss_count, latest_loss_exit_time) over the last `window` closed trades.
-
-    latest_loss_exit_time is a timezone-aware UTC datetime of the most recently
-    CLOSED losing trade in the window (or None if there are no losses). Callers
-    use it to anchor the cooldown countdown to when the loss actually closed,
-    instead of to when the next signal happens to arrive.
-    """
-    result = get_client().table("trades")\
-        .select("pnl, exit_time")\
-        .eq("mode", mode)\
-        .eq("status", "closed")\
-        .order("exit_time", desc=True)\
-        .limit(window)\
-        .execute()
-    rows = result.data or []  # already ordered newest-first
-    loss_count = 0
-    latest_loss_exit = None
-    for r in rows:
-        if r.get("pnl") is not None and r["pnl"] < 0:
-            loss_count += 1
-            if latest_loss_exit is None:
-                latest_loss_exit = _parse_dt(r.get("exit_time"))
-    return loss_count, latest_loss_exit
-
-def _parse_dt(s):
-    """Parse an ISO timestamp string into a tz-aware UTC datetime (None on failure)."""
-    if not s:
-        return None
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except (ValueError, TypeError):
-        return None
-
 def get_total_pnl(mode: str) -> float:
     result = get_client().table("trades")\
         .select("net_pnl")\

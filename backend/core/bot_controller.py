@@ -98,7 +98,6 @@ class BotController:
             asyncio.create_task(self._wallet_broadcast_loop()),
             asyncio.create_task(self._price_ticker_loop()),
             asyncio.create_task(self._binance_reconcile_loop()),
-            asyncio.create_task(self._cooldown_log_loop()),
         ]
 
         await self._broadcast({"type": "bot_status", "data": {"running": True, "mode": mode, "style": style, "pairs": pairs}})
@@ -233,10 +232,20 @@ class BotController:
                 )
 
                 if can_enter:
+                    # Weak-combo sizing: entries WITHOUT CVD-divergence (L2) are the
+                    # low-quality majority — combo L1+L3+L6+L7 = 53% WR / +0.15R over
+                    # 185 trades, vs L1+L2+L6+L7 = 63% WR / +0.46R with L2. Halve size
+                    # on bare 4/7 entries that lack L2 so weak setups risk less, without
+                    # cutting trade frequency.
+                    eff_capital = self._capital_pct
+                    if score <= 4 and not getattr(result, "cvd_divergence", 0):
+                        eff_capital = self._capital_pct / 2
+                        log.info(f"{pair}: weak combo (no CVD/L2, {score}/7) "
+                                 f"→ half size {eff_capital:.2f}% (from {self._capital_pct:.2f}%)")
                     log.info(f">>> TRADE SIGNAL: {pair} {result.signal_direction.upper()} "
                              f"score={score}/7 positions={open_count+1} price={self._md.get_price(pair)}")
                     task = asyncio.create_task(
-                        self._engine.enter(pair, self._style, result, self._capital_pct, score)
+                        self._engine.enter(pair, self._style, result, eff_capital, score)
                     )
                     task.add_done_callback(
                         lambda t: log.error(f"Enter task failed: {t.exception()}")
@@ -304,29 +313,6 @@ class BotController:
             "open_pairs":   list(self._engine._open.keys()) if self._engine else [],
             "positions":    positions,
         }
-
-    async def _cooldown_log_loop(self):
-        """Har 10 min mein cooldown ka remaining time log karo (agar active hai)."""
-        while self._running:
-            await asyncio.sleep(10 * 60)
-            if not self._running:
-                break
-            try:
-                if self._engine:
-                    status = self._engine.risk.status()
-                    remaining = status.get("cooldown_remaining_sec")
-                    if remaining and remaining > 0:
-                        mins      = remaining // 60
-                        secs      = remaining % 60
-                        level     = status.get("cooldown_level", 0) + 1
-                        total_min = status.get("cooldown_total_min") or "?"
-                        log.warning(
-                            f"⏳ Cooldown active — {mins}m {secs}s remaining "
-                            f"out of {total_min} min (level {level}/3). "
-                            f"No new trades until cooldown expires."
-                        )
-            except Exception as e:
-                log.error(f"Cooldown log loop error: {e}", exc_info=True)
 
     async def _binance_reconcile_loop(self):
         """

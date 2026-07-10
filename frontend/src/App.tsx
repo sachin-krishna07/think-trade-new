@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
+import Home from "./pages/Home";
 import Analytics from "./pages/Analytics";
 import History from "./pages/History";
 import Logs from "./pages/Logs";
@@ -24,6 +25,7 @@ const App = () => (
           <BotSocketProvider>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/wallet" element={<Layout><Home /></Layout>} />
             <Route path="/analytics" element={<Layout><Analytics /></Layout>} />
             <Route path="/history" element={<Layout><History /></Layout>} />
             <Route path="/logs" element={<Layout><Logs /></Layout>} />

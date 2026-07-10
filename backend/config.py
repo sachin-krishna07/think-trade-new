@@ -14,69 +14,110 @@ BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 # SUI(-$12.3k), NEAR(-$5.3k), TON(22% WR), OP(14% WR), POL(33% WR),
 # HBAR(0% WR), NOT(25% WR), ARB(-$6.2k in 3.0). Re-run pair analysis
 # monthly before re-adding.
+#
+# Rebuilt 2026-07-10 from a live-exchange volume screen (~150 pairs) —
+# cross-checked against Binance's actual symbol list, blocklist re-applied,
+# lowest-liquidity ~20 dropped. Sorted by screen volume, high to low.
+#
+# NOTE: tried switching market data (market_data.py) to Binance FUTURES
+# WebSocket so futures-only listings (no spot market — ~35 candidates:
+# HYPE, FARTCOIN, XMR, RIVER, AIN, etc.) could be included too. Verified
+# live via a demo bot run: futures WS connects and depth/bookTicker stream
+# fine, but @kline_* and @aggTrade never deliver a single message (tested
+# up to 65s, vs. instant on spot) — price stayed stuck at 0.0 the whole
+# run, which would silently block every entry. Reverted market data to the
+# spot feed (proven working) and dropped the 35 spot-less coins from this
+# list rather than ship an unverified data path. Re-attempt only after
+# confirming @kline_/@aggTrade actually deliver on futures from the
+# production VPS, not just this dev machine.
 PAIRS = {
-    # ⭐ TIER 1
-    "JUP":   "JUPUSDT",
-    "STX":   "STXUSDT",
-    "DOGE":  "DOGEUSDT",
-    "WIF":   "WIFUSDT",
-    "SOL":   "SOLUSDT",
-    "APT":   "APTUSDT",
-
-    # ✅ TIER 2
-    "ADA":   "ADAUSDT",
-    "AVAX":  "AVAXUSDT",
-    "TIA":   "TIAUSDT",
-    "ICP":   "ICPUSDT",
-    "BTC":   "BTCUSDT",
-    "ETH":   "ETHUSDT",
-    "LINK":  "LINKUSDT",
-
-    # 👀 TIER 3
-    "DOT":   "DOTUSDT",
-    "ATOM":  "ATOMUSDT",
+    "BTC": "BTCUSDT",
+    "ETH": "ETHUSDT",
+    "XAUT": "XAUTUSDT",
+    "PAXG": "PAXGUSDT",
+    "SOL": "SOLUSDT",
+    "XRP": "XRPUSDT",
+    "ZEC": "ZECUSDT",
+    "SKL": "SKLUSDT",
+    "DOGE": "DOGEUSDT",
+    "AAVE": "AAVEUSDT",
+    "ALLO": "ALLOUSDT",
+    "BNB": "BNBUSDT",
+    "UNI": "UNIUSDT",
+    "LINK": "LINKUSDT",
+    "BCH": "BCHUSDT",
+    "ADA": "ADAUSDT",
+    "LTC": "LTCUSDT",
+    "AVAX": "AVAXUSDT",
+    "KAITO": "KAITOUSDT",
     "EIGEN": "EIGENUSDT",
-    "UNI":   "UNIUSDT",
-    "RUNE":  "RUNEUSDT",
-    "SEI":   "SEIUSDT",
-    "PEPE":  "PEPEUSDT",
-
-    # 🔬 TIER 4
-    "TAO":   "TAOUSDT",
-    "ONDO":  "ONDOUSDT",
-    "ENA":   "ENAUSDT",
-    "FET":   "FETUSDT",
-    "WLD":   "WLDUSDT",
-    "BONK":  "BONKUSDT",
-    "BCH":   "BCHUSDT",
-
-    # 🧪 PROBATION (added 2026-07-03, no trade history yet —
-    # judge after ~20 trades each, same win-rate/net-pnl analysis)
-    "XRP":   "XRPUSDT",
-    "LTC":   "LTCUSDT",
-    "INJ":   "INJUSDT",
-    "AAVE":  "AAVEUSDT",
-    # market-profile screened 2026-07-03: matched proven winners' volatility
-    # (5m ATR 0.22-0.60%), trendiness and liquidity; all verified TRADING on
-    # Binance spot + USDT-M perpetual futures.
-    "ZEC":    "ZECUSDT",
-    "XLM":    "XLMUSDT",
+    "PARTI": "PARTIUSDT",
+    "GRAM": "GRAMUSDT",
+    "DOT": "DOTUSDT",
+    "TAO": "TAOUSDT",
+    "JTO": "JTOUSDT",
+    "TRX": "TRXUSDT",
+    "MMT": "MMTUSDT",
     "PENDLE": "PENDLEUSDT",
-    "MORPHO": "MORPHOUSDT",
-    "ME":     "MEUSDT",
-    "FF":     "FFUSDT",
-    "FIL":    "FILUSDT",
-    "TRUMP":  "TRUMPUSDT",
-    "PENGU":  "PENGUUSDT",
-    "ORDI":   "ORDIUSDT",
-    "BERA":   "BERAUSDT",
-    "RENDER": "RENDERUSDT",
-    "RED":    "REDUSDT",
-    "DASH":   "DASHUSDT",
-    "CRV":    "CRVUSDT",
+    "TIA": "TIAUSDT",
+    "MUBARAK": "MUBARAKUSDT",
+    "ONDO": "ONDOUSDT",
+    "XLM": "XLMUSDT",
+    "MANA": "MANAUSDT",
+    "ETHFI": "ETHFIUSDT",
+    "WLD": "WLDUSDT",
+    "LDO": "LDOUSDT",
+    "ZRO": "ZROUSDT",
+    "TRB": "TRBUSDT",
+    "JUP": "JUPUSDT",
+    "PEOPLE": "PEOPLEUSDT",
+    "IO": "IOUSDT",
+    "JASMY": "JASMYUSDT",
+    "WIF": "WIFUSDT",
+    "ORDI": "ORDIUSDT",
+    "INJ": "INJUSDT",
+    "ENA": "ENAUSDT",
+    "1000SATS": "1000SATSUSDT",
+    "AIGENSYN": "AIGENSYNUSDT",
+    "SAHARA": "SAHARAUSDT",
+    "DYDX": "DYDXUSDT",
+    "PENGU": "PENGUUSDT",
+    "BLUR": "BLURUSDT",
+    "ASTER": "ASTERUSDT",
+    "TRUMP": "TRUMPUSDT",
+    "KITE": "KITEUSDT",
+    "EDEN": "EDENUSDT",
+    "BIO": "BIOUSDT",
+    "TST": "TSTUSDT",
+    "ALT": "ALTUSDT",
+    "RSR": "RSRUSDT",
+    "CHIP": "CHIPUSDT",
+    "SEI": "SEIUSDT",
+    "DOGS": "DOGSUSDT",
+    "WCT": "WCTUSDT",
+    "XPL": "XPLUSDT",
+    "DASH": "DASHUSDT",
+    "GIGGLE": "GIGGLEUSDT",
+    "RED": "REDUSDT",
+    "LISTA": "LISTAUSDT",
+    "VANA": "VANAUSDT",
+    "FIL": "FILUSDT",
+    "CAKE": "CAKEUSDT",
+    "KSM": "KSMUSDT",
+    "LAYER": "LAYERUSDT",
+    "VIRTUAL": "VIRTUALUSDT",
+    "DUSK": "DUSKUSDT",
+    "ZK": "ZKUSDT",
+    "PROVE": "PROVEUSDT",
+    "SAGA": "SAGAUSDT",
+    "ETC": "ETCUSDT",
+    "BERA": "BERAUSDT",
+    "PNUT": "PNUTUSDT",
+    "ACT": "ACTUSDT",
+    "FRAX": "FRAXUSDT",
 }
 
-BINANCE_WS_BASE  = "wss://stream.binance.com:9443/stream"
+BINANCE_WS_BASE   = "wss://stream.binance.com:9443/stream"
 BINANCE_REST_BASE = "https://api.binance.com/api/v3"
 
 # ─── Scalping Strategy Params ───────────────────────────────
@@ -88,6 +129,10 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
+    "sl_entry_r":        0.75,  # actual SL placed at 0.75x the 1.35xATR risk distance —
+                                 # 1R (risk_amount, used for R-multiple + trailing ladder)
+                                 # still anchored to the full atr_sl_mult distance, so an
+                                 # SL-out now reports -0.75R instead of -1.00R.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
@@ -133,14 +178,8 @@ SWING = {
 MAX_DAILY_LOSS_PCT       = 100.0
 MAX_WEEKLY_DRAWDOWN_PCT  = 100.0
 
-# Progressive cooldown: (losses_in_last_5_trades, cooldown_minutes)
-LOSS_WINDOW      = 5
-COOLDOWN_LEVELS  = [(3, 30), (4, 60), (5, 120)]
-
-# Max simultaneous trades per mode
-MAX_TRADES_NORMAL     = 3   # 0-2 losses in window
-MAX_TRADES_SEMI       = 2   # recovering (1 win after restricted)
-MAX_TRADES_RESTRICTED = 1   # just came out of cooldown
+# Max simultaneous trades
+MAX_TRADES_NORMAL = 3
 
 MAX_LEVERAGE             = 20.0  # hard ceiling — user can never go above this
 DEFAULT_LEVERAGE         = 5.0   # default if user doesn't specify

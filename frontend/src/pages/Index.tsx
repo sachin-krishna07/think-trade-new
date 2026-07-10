@@ -17,6 +17,7 @@ function formatSeconds(s: number) {
 const MIN_HEIGHT = 40;   // collapsed — only header visible
 const DEFAULT_HEIGHT = 220;
 const MAX_HEIGHT = 520;
+const MOBILE_NAV_HEIGHT = 84;
 
 export default function Index() {
   const { state, startBot, stopBot, forceClose } = useBotSocketContext();
@@ -26,7 +27,6 @@ export default function Index() {
   const { fmtINR } = useExchangeRate();
 
   const positions   = Object.values(state.positions);
-  const pos         = positions[0] ?? null;
   const totalPnl    = positions.reduce((sum, p) => sum + (p.pnl ?? 0), 0);
   const totalPnlPct = positions.reduce((sum, p) => sum + (p.pnl_pct ?? 0), 0);
   const isDragging  = useRef(false);
@@ -80,7 +80,7 @@ export default function Index() {
   const currentHeight = isOpen ? drawerHeight : MIN_HEIGHT;
 
   return (
-    <div className="h-screen flex flex-col bg-[#070a10] text-white overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#070a10] text-white overflow-hidden pb-[84px] md:pb-0">
       <AppHeader
         connected={state.connected}
         running={state.running}
@@ -95,13 +95,13 @@ export default function Index() {
       <div className="flex flex-1 overflow-hidden relative">
         {/* Mobile backdrop */}
         {sidebarOpen && (
-          <div className="fixed inset-0 z-20 bg-black/60 md:hidden"
+          <div className="fixed inset-0 z-50 bg-black/60 md:hidden"
             onClick={() => setSidebarOpen(false)} />
         )}
 
         {/* Sidebar */}
         <aside className={`
-            fixed md:relative inset-y-0 left-0 z-30 md:z-auto
+            fixed md:relative inset-y-0 left-0 z-[60] md:z-auto
             w-[300px] md:w-80 flex-shrink-0
             flex flex-col gap-4
             border-r border-[#1e2433] bg-[#070a10]
@@ -134,7 +134,7 @@ export default function Index() {
         {/* Main Panel */}
         <main
           className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#07090f] min-w-0"
-          style={{ paddingBottom: `${currentHeight + 16}px` }}
+          style={{ paddingBottom: `${currentHeight + MOBILE_NAV_HEIGHT + 16}px` }}
         >
           <div className="flex items-center justify-between gap-3 border-b border-[#1a2030] pb-3 mb-1">
             <div className="flex items-center gap-2.5">
@@ -167,7 +167,7 @@ export default function Index() {
 
         {/* ── Bottom Drawer (VS Code style) ── */}
         <div
-          className="fixed bottom-0 right-0 z-40 flex flex-col md:left-80 left-0"
+          className="fixed bottom-[84px] right-0 z-40 flex flex-col md:bottom-0 md:left-80 left-0"
           style={{
             height: `${currentHeight}px`,
             transition: isDragging.current ? "none" : "height 0.2s ease",

@@ -14,7 +14,7 @@ export default function History() {
   }, [state.mode]);
 
   return (
-    <main className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#07090f]">
+    <main className="flex-1 overflow-y-auto p-4 pb-24 md:pb-4 space-y-4 bg-[#07090f]">
       <div className="flex items-center justify-between gap-3 border-b border-[#1a2030] pb-3 mb-1">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">

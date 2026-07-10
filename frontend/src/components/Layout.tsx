@@ -16,7 +16,7 @@ export default function Layout({ children }: Props) {
   const positions = Object.values(state.positions);
 
   return (
-    <div className="h-screen flex flex-col bg-[#070a10] text-white overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#070a10] text-white overflow-hidden pb-[84px] md:pb-0">
       <AppHeader
         connected={state.connected}
         running={state.running}
@@ -31,14 +31,14 @@ export default function Layout({ children }: Props) {
         {/* Mobile backdrop */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 z-20 bg-black/60 md:hidden"
+            className="fixed inset-0 z-50 bg-black/60 md:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
         {/* Sidebar */}
         <aside className={`
-          fixed md:relative inset-y-0 left-0 z-30 md:z-auto
+          fixed md:relative inset-y-0 left-0 z-[60] md:z-auto
           w-[300px] md:w-80 flex-shrink-0
           flex flex-col gap-4
           border-r border-[#1e2433] bg-[#070a10]

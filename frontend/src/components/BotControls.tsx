@@ -1,22 +1,30 @@
 import { useState, useEffect } from "react";
 import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Blocklisted 2026-07-03 (2.0 trade data): SUI, NEAR, TON, OP, POL, HBAR, NOT, ARB
+// Rebuilt 2026-07-10 to match backend config.py — sorted by exchange volume,
+// high to low. Must stay in sync with PAIRS in backend/config.py.
 const ALL_PAIRS = [
-  // ⭐ TIER 1
-  "JUP", "STX", "DOGE", "WIF", "SOL", "APT",
-  // ✅ TIER 2
-  "ADA", "AVAX", "TIA", "ICP", "BTC", "ETH", "LINK",
-  // 👀 TIER 3
-  "DOT", "ATOM", "EIGEN", "UNI", "RUNE", "SEI", "PEPE",
-  // 🔬 TIER 4
-  "TAO", "ONDO", "ENA", "FET", "WLD", "BONK", "BCH",
-  // 🧪 PROBATION (new — no history yet, judge after ~20 trades)
-  "XRP", "LTC", "INJ", "AAVE",
-  // market-profile screened 2026-07-03 (winner-matched volatility/trend/liquidity)
-  "ZEC", "XLM", "PENDLE", "MORPHO", "ME", "FF", "FIL", "TRUMP",
-  "PENGU", "ORDI", "BERA", "RENDER", "RED", "DASH", "CRV",
+  "BTC", "ETH", "XAUT", "PAXG", "SOL", "XRP", "ZEC", "SKL",
+  "DOGE", "AAVE", "ALLO", "BNB", "UNI", "LINK", "BCH", "ADA",
+  "LTC", "AVAX", "KAITO", "EIGEN", "PARTI", "GRAM", "DOT", "TAO",
+  "JTO", "TRX", "MMT", "PENDLE", "TIA", "MUBARAK", "ONDO", "XLM",
+  "MANA", "ETHFI", "WLD", "LDO", "ZRO", "TRB", "JUP", "PEOPLE",
+  "IO", "JASMY", "WIF", "ORDI", "INJ", "ENA", "1000SATS", "AIGENSYN",
+  "SAHARA", "DYDX", "PENGU", "BLUR", "ASTER", "TRUMP", "KITE", "EDEN",
+  "BIO", "TST", "ALT", "RSR", "CHIP", "SEI", "DOGS", "WCT",
+  "XPL", "DASH", "GIGGLE", "RED", "LISTA", "VANA", "FIL", "CAKE",
+  "KSM", "LAYER", "VIRTUAL", "DUSK", "ZK", "PROVE", "SAGA", "ETC",
+  "BERA", "PNUT", "ACT", "FRAX",
 ];
 
 interface Props {
@@ -32,6 +40,7 @@ interface Props {
 
 export default function BotControls({ running, mode: curMode, style: curStyle,
   onStart, onStop, onForceClose, hasPosition, walletBalance }: Props) {
+  const actionPin = import.meta.env.VITE_BOT_ACTION_PIN;
 
   const [mode, setMode]             = useState(() => localStorage.getItem("bot_mode") || "demo");
   const [style, setStyle]           = useState(() => localStorage.getItem("bot_style") || "scalping");
@@ -47,6 +56,10 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   const [capitalPct, setCapitalPct] = useState(() => localStorage.getItem("bot_capital") || "1");
   const [leverage, setLeverage]     = useState(() => localStorage.getItem("bot_leverage") || "5");
   const [loading, setLoading]       = useState(false);
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"start" | "stop" | null>(null);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState("");
   const { fmtINR, rate }            = useExchangeRate();
 
   // Estimated trade size calculation
@@ -59,6 +72,14 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   useEffect(() => {
     if (running) setLoading(false);
   }, [running]);
+
+  useEffect(() => {
+    if (!pinDialogOpen) {
+      setPinValue("");
+      setPinError("");
+      setPendingAction(null);
+    }
+  }, [pinDialogOpen]);
 
   const togglePair = (p: string) =>
     setPairs((prev) => {
@@ -76,6 +97,14 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
     const pct = parseFloat(capitalPct);
     if (isNaN(pct) || pct <= 0 || pct > 50) return;
     if (pairs.length === 0) return;
+    setPendingAction("start");
+    setPinDialogOpen(true);
+  };
+
+  const executeStart = async () => {
+    const pct = parseFloat(capitalPct);
+    if (isNaN(pct) || pct <= 0 || pct > 50) return;
+    if (pairs.length === 0) return;
     try {
       setLoading(true);
       const lev = Math.min(Math.max(parseFloat(leverage) || 5, 1), 20);
@@ -88,11 +117,34 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   };
 
   const handleStop = async () => {
+    setPendingAction("stop");
+    setPinDialogOpen(true);
+  };
+
+  const executeStop = async () => {
     try {
       setLoading(true);
       await onStop();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const confirmPinAction = async () => {
+    if (pinValue.length !== 4) {
+      setPinError("Enter 4-digit PIN");
+      return;
+    }
+    if (pinValue !== actionPin) {
+      setPinError("Wrong PIN");
+      return;
+    }
+
+    setPinDialogOpen(false);
+    if (pendingAction === "start") {
+      await executeStart();
+    } else if (pendingAction === "stop") {
+      await executeStop();
     }
   };
 
@@ -266,9 +318,61 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
           </div>
         )}
         <p className="text-[11px] text-gray-600">
-          SL: ATR×1.35 · Max loss: 1.5R · Breakeven: 1R · Trailing from 1.5R
+          SL: ATR×1.35×0.75 · Max loss: -1.5R · Trailing from 1.1R (locks +0.85R)
         </p>
       </div>
+
+      <Dialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
+        <DialogContent className="z-[120] border-[#1e2433] bg-[#0d1117] text-white sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>{pendingAction === "start" ? "Start Bot" : "Stop Bot"}</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Enter 4-digit PIN to continue
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              value={pinValue}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+                setPinValue(digits);
+                setPinError("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void confirmPinAction();
+              }}
+              autoFocus
+              className="w-full rounded-xl border border-[#2a3045] bg-[#111827] px-4 py-3 text-center text-2xl font-bold tracking-[0.4em] text-white outline-none focus:border-indigo-500/60"
+              placeholder="••••"
+            />
+            {pinError && (
+              <div className="text-center text-sm text-red-400">{pinError}</div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setPinDialogOpen(false)}
+              className="rounded-lg border border-[#2a3045] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:bg-white/5"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void confirmPinAction()}
+              className="rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-4 py-2 text-sm font-semibold text-indigo-300 transition-colors hover:bg-indigo-500/20"
+            >
+              Confirm
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Buttons */}
       <div className="flex gap-2 pt-1">

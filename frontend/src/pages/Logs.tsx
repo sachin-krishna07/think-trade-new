@@ -92,7 +92,7 @@ export default function Logs() {
   });
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden p-2 sm:p-4 gap-2 sm:gap-3">
+    <div className="flex flex-col flex-1 overflow-hidden p-2 pb-24 sm:p-4 md:pb-4 gap-2 sm:gap-3">
         {/* Toolbar */}
         <div className="flex flex-col gap-2">
           {/* Row 1: Source + Level + Actions */}

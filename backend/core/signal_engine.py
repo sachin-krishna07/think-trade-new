@@ -106,7 +106,10 @@ class SignalEngine:
         if not self.md.is_ready(pair, style):
             return result
 
-        entry_candles = self.md.get_candles(pair, cfg["entry_tf"])
+        # closed_only=True → drop the still-forming candle so all indicators
+        # (ATR, VWAP, RSI, sweeps, FVG) are computed on completed candles only.
+        # current_price above stays live for display/exit logic.
+        entry_candles = self.md.get_candles(pair, cfg["entry_tf"], closed_only=True)
 
         if len(entry_candles) < 20:
             return result
@@ -147,7 +150,10 @@ class SignalEngine:
 
         tf_directions = []
         for i, tf in enumerate(confirm_tfs):
-            tf_candles = self.md.get_candles(pair, tf)
+            # closed_only=True — the multi-TF trend must be read from CLOSED
+            # candles. A forming 30m candle can flip the EMA/ADX/DI trend for up
+            # to 30 min, which is the #1 cause of false-trend entries.
+            tf_candles = self.md.get_candles(pair, tf, closed_only=True)
             if len(tf_candles) < 30:
                 tf_directions.append("neutral")
                 continue
@@ -212,7 +218,7 @@ class SignalEngine:
         H1_RSI_OB = 75   # overbought threshold
         H1_RSI_OS = 25   # oversold threshold
         try:
-            h1_candles = self.md.get_candles(pair, "1h")
+            h1_candles = self.md.get_candles(pair, "1h", closed_only=True)
             if len(h1_candles) >= 30:
                 h1_closes = [c["close"] for c in h1_candles]
                 h1_highs  = [c["high"]  for c in h1_candles]
