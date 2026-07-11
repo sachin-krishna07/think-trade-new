@@ -303,39 +303,23 @@ def dom_imbalance(bids: List[Tuple[float, float]],
 
 # ─── EMA Pullback ────────────────────────────────────────────
 
-def ema_pullback(closes: List[float], highs: List[float], lows: List[float],
-                 direction: str, atr_value: float = 0.0,
-                 period: int = 9, tolerance_pct: float = 0.0075,
-                 spike_mult: float = 2.0) -> bool:
+def ema_pullback(closes: List[float], direction: str,
+                 period: int = 9, tolerance_pct: float = 0.0075) -> bool:
     """
-    Advanced EMA-9 pullback detector — 6 conditions must ALL pass.
+    Advanced EMA-9 pullback detector — 4 conditions must ALL pass.
 
     C1 — PROXIMITY:  Price is near EMA-9 right now (entry zone).
     C2 — EMA SLOPE:  EMA-9 is still trending in the trade direction.
                      Ensures trend is intact, not reversing.
-    C3 — EXTENSION:  Price was meaningfully away from EMA recently, via a
-                     SUSTAINED move — not a single outlier spike candle
-                     (e.g. a stop-hunt wick that instantly mean-reverts).
-                     Candles whose range exceeds spike_mult × ATR are
-                     excluded before measuring how extended price got.
-    C4 — APPROACH:   Price is coming FROM the correct side toward EMA
-                     (at least 1 of last 5 candles on the far side = genuine
-                     pullback, not a surge straight through EMA). The
-                     approach itself must also be gradual: none of those
-                     candles may be an oversized spike/crash relative to
-                     ATR — a violent snap-back isn't a real "pullback".
-    C5 — EMA INTACT: EMA not broken in the last 5 candles.
-    C6 — MOMENTUM:   The last 3 closes aren't a straight sequence still
-                     moving against the trade direction. Catches a decline
-                     spread across several normal-sized candles (no single
-                     spike for C3/C4 to flag) that just hasn't stabilized
-                     yet — price is still actively falling/rising, not
-                     pulling back.
-
-    atr_value scales C3/C4's spike filter to each pair's own volatility —
-    a fixed % tolerance would be too wide for calm pairs (BTC) and too
-    tight for volatile ones. Falls back to skipping the spike filter if
-    atr_value isn't available (e.g. called before ATR is computed).
+    C3 — EXTENSION:  Price was meaningfully away from EMA recently.
+                     Confirms a real move happened before the pullback.
+    C4 — APPROACH:   Price is coming FROM the correct side toward EMA.
+                     LONG → price came DOWN to EMA (at least 2 of last 5
+                     candles were higher than now = genuine pullback).
+                     SHORT → price came UP to EMA (at least 2 of last 5
+                     candles were lower than now = genuine bounce).
+                     This prevents false triggers when price SURGES THROUGH
+                     EMA (e.g. RSI 85 pump crossing EMA upward = not a pullback).
     """
     if len(closes) < period + 8:
         return False
@@ -350,14 +334,6 @@ def ema_pullback(closes: List[float], highs: List[float], lows: List[float],
     dev       = (current_price - current_ema) / current_ema
     ema_slope = (ema_vals[-1] - ema_vals[-6]) / ema_vals[-6]  # % change over 5 candles
 
-    spike_threshold = spike_mult * atr_value if atr_value > 0 else None
-
-    def candle_range(i: int) -> float:
-        return highs[-i] - lows[-i]
-
-    def is_spike(i: int) -> bool:
-        return spike_threshold is not None and candle_range(i) > spike_threshold
-
     if direction == "long":
         # C1: price near EMA — wider zone, allow more overshoot both sides
         if not (-0.005 <= dev <= tolerance_pct * 1.5):
@@ -367,38 +343,29 @@ def ema_pullback(closes: List[float], highs: List[float], lows: List[float],
         if ema_slope <= 0.0001:
             return False
 
-        # C3: price was extended ABOVE EMA recently — via non-spike candles only
-        ext_range = range(2, min(13, len(closes)))
-        non_spike_exts = [
+        # C3: price was extended ABOVE EMA recently — relaxed threshold
+        peak_ext = max(
             (closes[-i] - ema_vals[-i]) / ema_vals[-i]
-            for i in ext_range if not is_spike(i)
-        ]
-        if not non_spike_exts:
-            return False
-        if max(non_spike_exts) < tolerance_pct * 0.8:
+            for i in range(2, min(13, len(closes)))
+        )
+        if peak_ext < tolerance_pct * 0.8:
             return False
 
-        # C4: price approached from ABOVE — at least 1 of last 5 closes higher than
-        # now, AND the approach was gradual (no oversized spike/crash candle in it)
-        approach_range = range(2, min(7, len(closes)))
-        candles_higher = sum(1 for i in approach_range if closes[-i] > current_price * 1.001)
+        # C4: price approached from ABOVE — at least 1 of last 5 closes higher than now
+        candles_higher = sum(
+            1 for i in range(2, min(7, len(closes)))
+            if closes[-i] > current_price * 1.001
+        )
         if candles_higher < 1:
-            return False
-        if any(is_spike(i) for i in approach_range):
             return False
 
         # C5: EMA not broken — at least 4 of last 5 candles closed ABOVE EMA
         # Prevents entering after trend break that is just retesting EMA as resistance
-        ema_above = sum(1 for i in approach_range if closes[-i] >= ema_vals[-i])
+        ema_above = sum(
+            1 for i in range(2, min(7, len(closes)))
+            if closes[-i] >= ema_vals[-i]
+        )
         if ema_above < 4:
-            return False
-
-        # C6: no active downward momentum right now — the last 3 closes must not
-        # be a straight declining sequence. A spike/oversized single candle can
-        # dodge C3/C4's per-candle checks if the fall is spread over several
-        # normal-sized candles instead; this catches "still actively falling",
-        # not yet stabilized, even when no single candle looks like a spike.
-        if len(closes) >= 3 and closes[-1] < closes[-2] < closes[-3]:
             return False
 
         return True
@@ -412,35 +379,29 @@ def ema_pullback(closes: List[float], highs: List[float], lows: List[float],
         if ema_slope >= -0.0001:
             return False
 
-        # C3: price was extended BELOW EMA recently — via non-spike candles only
-        ext_range = range(2, min(13, len(closes)))
-        non_spike_exts = [
+        # C3: price was extended BELOW EMA recently — relaxed threshold
+        trough_ext = min(
             (closes[-i] - ema_vals[-i]) / ema_vals[-i]
-            for i in ext_range if not is_spike(i)
-        ]
-        if not non_spike_exts:
-            return False
-        if min(non_spike_exts) > -tolerance_pct * 0.8:
+            for i in range(2, min(13, len(closes)))
+        )
+        if trough_ext > -tolerance_pct * 0.8:
             return False
 
-        # C4: price approached from BELOW — at least 1 of last 5 closes lower than
-        # now, AND the approach was gradual (no oversized spike/crash candle in it)
-        approach_range = range(2, min(7, len(closes)))
-        candles_lower = sum(1 for i in approach_range if closes[-i] < current_price * 0.999)
+        # C4: price approached from BELOW — at least 1 of last 5 closes lower than now
+        candles_lower = sum(
+            1 for i in range(2, min(7, len(closes)))
+            if closes[-i] < current_price * 0.999
+        )
         if candles_lower < 1:
-            return False
-        if any(is_spike(i) for i in approach_range):
             return False
 
         # C5: EMA not broken — at least 4 of last 5 candles closed BELOW EMA
         # Prevents entering after trend break that is just retesting EMA as support
-        ema_below = sum(1 for i in approach_range if closes[-i] <= ema_vals[-i])
+        ema_below = sum(
+            1 for i in range(2, min(7, len(closes)))
+            if closes[-i] <= ema_vals[-i]
+        )
         if ema_below < 4:
-            return False
-
-        # C6: no active upward momentum right now — the last 3 closes must not
-        # be a straight rising sequence (still actively climbing, not stabilized).
-        if len(closes) >= 3 and closes[-1] > closes[-2] > closes[-3]:
             return False
 
         return True
@@ -536,16 +497,18 @@ def vwap_retracement(closes: List[float], highs: List[float],
         peak_neg = min(past_devs)
         if peak_neg >= -min_dev_pct:
             return False
-        # Price must have recovered at least 30% of the peak drop
-        recovery_needed = peak_neg * 0.70  # e.g. peak=-0.5% → need to reach -0.35%
+        # Price must have recovered at least 50% of the peak drop (lowered from
+        # 70% on 2026-07-10 — fires on a smaller retracement)
+        recovery_needed = peak_neg * 0.50  # e.g. peak=-0.5% → need to reach -0.25%
         return current_dev >= recovery_needed
 
     if direction == "short":
         peak_pos = max(past_devs)
         if peak_pos <= min_dev_pct:
             return False
-        # Price must have fallen back at least 30% of the peak rise
-        recovery_needed = peak_pos * 0.70  # e.g. peak=+0.5% → need to drop to +0.35%
+        # Price must have fallen back at least 50% of the peak rise (lowered from
+        # 70% on 2026-07-10 — fires on a smaller retracement)
+        recovery_needed = peak_pos * 0.50  # e.g. peak=+0.5% → need to drop to +0.25%
         return current_dev <= recovery_needed
 
     return False

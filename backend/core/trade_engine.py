@@ -389,13 +389,20 @@ class TradeEngine:
             user_leverage=self.leverage
         )
 
-        direction = signal.signal_direction
+        # Reversed 2026-07-10 per user request — execute the OPPOSITE of what the
+        # signal engine detects. All 7 layers + L8 still score/gate the TRUE
+        # direction above; only the actual executed side flips here.
+        direction = "short" if signal.signal_direction == "long" else "long"
         sl_dist   = sizing["sl_distance"]
-        tp_dist   = sl_dist * (cfg["atr_tp_mult"] / cfg["atr_sl_mult"])
 
         # Actual SL is placed tighter than the full 1R distance (risk_amount stays
         # anchored to sl_dist, so an SL-out reports sl_entry_r, e.g. -0.75R, not -1.00R).
         sl_entry_dist = sl_dist * cfg.get("sl_entry_r", 1.0)
+
+        # Fixed 1:1 R:R — TP at +1R, no trailing SL (removed 2026-07-10 per user
+        # request). TP distance matches the actual SL distance, not the full 1R
+        # risk_amount reference, so TP lands exactly where SL would if it were at 1R.
+        tp_dist = sl_entry_dist
 
         if direction == "long":
             sl_price = entry_price - sl_entry_dist
@@ -559,34 +566,7 @@ class TradeEngine:
         risk_amount  = pos_snapshot["risk_amount"]
         entry_time   = datetime.now(timezone.utc)
 
-        initial_sl_dist = abs(entry_price - sl_price)
-        highest_pnl    = 0.0
-        trail_step     = 0        # index of next TRAIL_STEPS to check
-        profit_locked  = False    # True once any profit is locked (0.3R+)
-        trailing_sl    = sl_price
-
-        # (trigger_R, lock_R): when price hits trigger_R → SL moves to lock_R
-        # Steps every ~0.3R, gap 0.25-0.30R throughout. Shifted +0.1R across
-        # the board (2026-07-10) — same ladder shape, entered/locked slightly
-        # later.
-        TRAIL_STEPS = [
-            (1.10, 0.85),   # 1.1R → lock 0.85R (gap: 0.25R)
-            (1.40, 1.10),   # 1.4R → lock 1.10R (gap: 0.30R)
-            (1.60, 1.30),   # 1.6R → lock 1.30R (gap: 0.30R)
-            (1.90, 1.60),   # 1.9R → lock 1.60R (gap: 0.30R)
-            (2.20, 1.90),   # 2.2R → lock 1.90R (gap: 0.30R)
-            (2.60, 2.30),   # 2.6R → lock 2.30R (gap: 0.30R)
-            (3.10, 2.80),   # 3.1R → lock 2.80R (gap: 0.30R)
-            (3.60, 3.30),   # 3.6R → lock 3.30R (gap: 0.30R)
-            (4.10, 3.80),   # 4.1R → lock 3.80R (gap: 0.30R)
-        ]
-
-
-        r_price = lambda n: (
-            entry_price + n * (risk_amount / pos_size_usd) * entry_price
-            if direction == "long"
-            else entry_price - n * (risk_amount / pos_size_usd) * entry_price
-        )
+        highest_pnl = 0.0
 
         _consecutive_errors = 0  # track back-to-back errors to detect hard failures
 
@@ -599,7 +579,6 @@ class TradeEngine:
                     continue
 
                 elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds()
-                _ = elapsed  # tracked for UI display only, not used for exit
 
                 # ── PnL calculation ──────────────────────────────
                 if direction == "long":
@@ -609,43 +588,9 @@ class TradeEngine:
 
                 pnl = pnl_pct * pos_size_usd
                 highest_pnl = max(highest_pnl, pnl)
-
-                # ── Trailing SL logic ────────────────────────────
                 r_current = pnl / risk_amount if risk_amount > 0 else 0
 
-                # Process all pending trail steps in order
-                sl_updated = False
-                while trail_step < len(TRAIL_STEPS):
-                    trigger_r, lock_r = TRAIL_STEPS[trail_step]
-                    if r_current >= trigger_r:
-                        new_sl = r_price(lock_r)
-                        if (direction == "long"  and new_sl > sl_price) or \
-                           (direction == "short" and new_sl < sl_price):
-                            sl_price    = new_sl
-                            trailing_sl = sl_price
-                            sl_updated  = True
-                            log.info(f"{pair} {trigger_r}R hit — SL → +{lock_r}R ({sl_price:.6f})")
-                        if lock_r > 0:
-                            profit_locked = True
-                        trail_step += 1
-                    else:
-                        break  # steps are ordered, no need to check further
-
-                # ── Live: Update SL on Binance when trailing SL moves ──
-                if sl_updated and self.mode == "live" and self._binance:
-                    symbol = pair + "USDT" if not pair.endswith("USDT") else pair
-                    quantity = pos_snapshot.get("quantity", 0)
-                    sl_side = "SELL" if direction == "long" else "BUY"
-                    try:
-                        await self._binance.cancel_all_orders(symbol)
-                        await self._binance.place_stop_order(symbol, sl_side, quantity, sl_price)
-                        await self._binance.place_tp_order(symbol, sl_side, quantity, tp_price)
-                        log.info(f"{pair} Binance SL updated → {sl_price:.4f}")
-                    except Exception as e:
-                        log.error(f"{pair} Failed to update Binance SL: {e}")
-
                 # Update position in DB (every 5 checks to reduce writes)
-                breakeven_hit = trail_step > 0   # at least 0.3R step triggered
                 if int(elapsed * 2) % 10 == 0:
                     try:
                         await asyncio.to_thread(
@@ -653,10 +598,7 @@ class TradeEngine:
                             position_id, current_price,
                             round(pnl, 4), round(pnl_pct * 100, 4),
                             round(highest_pnl, 4),
-                            round(trailing_sl, 6) if trailing_sl else None,
-                            breakeven_hit,
-                            profit_locked,
-                            round(sl_price, 6),
+                            sl_price=round(sl_price, 6),
                         )
                     except Exception as e:
                         log.warning(f"{pair} DB update failed (non-fatal): {e}")
@@ -674,55 +616,32 @@ class TradeEngine:
                         "pnl_pct":       round(pnl_pct * 100, 4),
                         "r":             round(r_current, 3),
                         "highest_pnl":   round(highest_pnl, 4),
-                        "breakeven_hit": breakeven_hit,
-                        "profit_locked": profit_locked,
-                        "trailing_sl":   round(trailing_sl, 6),
                         "elapsed_sec":   int(elapsed),
                         "size_usd":      round(pos_size_usd, 2),
                         "risk_usd":      round(risk_amount, 2),
                     }
                 })
 
-                # ── Exit conditions ──────────────────────────────
+                # ── Exit conditions — fixed SL (-1R) / fixed TP (+1R), no trailing ──
                 exit_reason = None
-
-                # 4.1R → hard exit (profit booked) — matches the last TRAIL_STEPS trigger
-                if r_current >= 4.1:
-                    exit_reason = "2r_target"
-                # Early stop — exit at -1.5R if no trailing step has triggered yet
-                elif r_current <= -1.5 and trail_step == 0:
-                    exit_reason = "max_loss"
-                elif direction == "long":
+                if direction == "long":
                     if current_price <= sl_price:
-                        exit_reason = "sl" if trail_step == 0 else "trailing"
+                        exit_reason = "sl"
                     elif current_price >= tp_price:
                         exit_reason = "tp"
                 else:
                     if current_price >= sl_price:
-                        exit_reason = "sl" if trail_step == 0 else "trailing"
+                        exit_reason = "sl"
                     elif current_price <= tp_price:
                         exit_reason = "tp"
 
                 if exit_reason:
-                    # SL / breakeven / trailing → exit at sl_price (simulates real SL order).
-                    # max_loss → exit at exact -0.7R price level (simulates stop order, caps slippage).
-                    # TP and 2R target → exit at current_price (market fill, no fixed order).
-                    if exit_reason in ("sl", "breakeven", "trailing"):
-                        exit_p = sl_price
-                        if direction == "long":
-                            exit_pct = (sl_price - entry_price) / entry_price
-                        else:
-                            exit_pct = (entry_price - sl_price) / entry_price
-                        exit_pnl = exit_pct * pos_size_usd
-                    elif exit_reason == "max_loss":
-                        exit_p = r_price(-1.5)
-                        exit_pct = -1.5 * (risk_amount / pos_size_usd)
-                        exit_pnl = -1.5 * risk_amount
+                    exit_p = sl_price if exit_reason == "sl" else tp_price
+                    if direction == "long":
+                        exit_pct = (exit_p - entry_price) / entry_price
                     else:
-                        # tp, 2r_target — exit at current market price
-                        exit_p   = current_price
-                        exit_pnl = pnl
-                        exit_pct = pnl_pct
+                        exit_pct = (entry_price - exit_p) / entry_price
+                    exit_pnl = exit_pct * pos_size_usd
 
                     await self._close_position(pair, trade_id, position_id, pos_snapshot,
                                                exit_p, exit_pnl, exit_pct, risk_amount,
@@ -756,8 +675,8 @@ class TradeEngine:
         if not self._open[pair]:
             del self._open[pair]
 
-        # SL cooldown — set on sl, trailing, or max_loss exit to block re-entry for 20 min
-        if reason in ("sl", "trailing", "max_loss"):
+        # SL cooldown — set on SL exit to block re-entry for 20 min
+        if reason == "sl":
             self._sl_cooldown[pair] = time.time()
             log.info(f"{pair}: SL cooldown started — no re-entry for 20 min")
 

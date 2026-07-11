@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
 from typing import Callable, Dict, List, Optional, Set
 
-from config import SCALPING, SWING, SIGNAL_BROADCAST_INTERVAL, MIN_SIGNAL_SCORE, QUIET_HOURS_START, QUIET_HOURS_END
+from config import SCALPING, SWING, SIGNAL_BROADCAST_INTERVAL, MIN_SIGNAL_SCORE
 from core.market_data import MarketDataManager
 from core.signal_engine import SignalEngine
 from core.risk_manager import RiskManager
@@ -137,31 +136,13 @@ class BotController:
     def is_running(self) -> bool:
         return self._running
 
-    # ─── Quiet Hours ────────────────────────────────────────
-
-    def _in_quiet_hours(self) -> bool:
-        ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-        t = (ist.hour, ist.minute)
-        return QUIET_HOURS_START <= t < QUIET_HOURS_END
-
     # ─── Signal Loop ────────────────────────────────────────
 
     async def _signal_loop(self):
         warm_up_scans = 0          # skip entries for first 2 scans after restart
-        _quiet_announced = False
         while self._running:
             try:
-                in_quiet = self._in_quiet_hours()
-                if in_quiet and not _quiet_announced:
-                    log.warning(
-                        f"QUIET HOURS active (2:00 AM – 8:00 AM IST) — new entries paused"
-                    )
-                    _quiet_announced = True
-                elif not in_quiet and _quiet_announced:
-                    log.info("QUIET HOURS ended — trade entries resumed")
-                    _quiet_announced = False
-
-                await self._process_signals(allow_entry=warm_up_scans >= 2 and not in_quiet)
+                await self._process_signals(allow_entry=warm_up_scans >= 2)
                 if warm_up_scans < 2:
                     warm_up_scans += 1
                     log.info(f"Warm-up scan {warm_up_scans}/2 — entries paused (stale signal guard)")
