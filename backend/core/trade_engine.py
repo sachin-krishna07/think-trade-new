@@ -418,6 +418,9 @@ class TradeEngine:
         # Gate: risk must be at least 3× total fee
         if sizing["risk_amount"] < total_fee_est * 3.0:
             log.info(f"{pair}: skipped — risk ₹{sizing['risk_amount']:.1f} too small vs fee ₹{total_fee_est:.1f}")
+            # Same setup will fail this exact check every scan cycle until the
+            # signal itself changes — cooldown it so it doesn't spam-retry.
+            self._entry_fail_cooldown[pair] = time.time()
             return False
 
         trade_data = {
