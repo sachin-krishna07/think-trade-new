@@ -359,15 +359,14 @@ class SignalEngine:
         result.total_score      = score
         result.signal_direction = direction
 
-        # ── L8: EMA Pullback (Mandatory Gate) ───────────────────
-        # Price must be near EMA-9 on entry TF before any trade.
-        # Long:  price pulled back near EMA-9 from above (dip before resume up)
-        # Short: price bounced near EMA-9 from below (pop before resume down)
-        # Also checks: EMA not flat, EMA not broken in last 5 candles
+        # ── L8: EMA Pullback (informational only, no longer a gate) ──
+        # Price near EMA-9 pullback/bounce check — still computed and shown on
+        # the signal card, but removed 2026-07-10 (per user request) from the
+        # mandatory conditions for trade_signal. Was blocking too many entries.
         pullback_ok = ema_pullback(e_closes, direction, period=9, tolerance_pct=0.0075)
         result.ema_pullback = 1 if pullback_ok else 0
 
-        if score >= MIN_SIGNAL_SCORE and quality_ok and pullback_ok:
+        if score >= MIN_SIGNAL_SCORE and quality_ok:
             result.trade_signal = True
         else:
             result.trade_signal = False
