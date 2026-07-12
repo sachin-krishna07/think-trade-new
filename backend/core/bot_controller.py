@@ -213,16 +213,10 @@ class BotController:
                 )
 
                 if can_enter:
-                    # Weak-combo sizing: entries WITHOUT CVD-divergence (L2) are the
-                    # low-quality majority — combo L1+L3+L6+L7 = 53% WR / +0.15R over
-                    # 185 trades, vs L1+L2+L6+L7 = 63% WR / +0.46R with L2. Halve size
-                    # on bare 4/7 entries that lack L2 so weak setups risk less, without
-                    # cutting trade frequency.
+                    # Weak-combo half-sizing removed 2026-07-10 per user request —
+                    # every entry now uses the full capital_pct the bot was started
+                    # with, regardless of whether L2/CVD-divergence fired.
                     eff_capital = self._capital_pct
-                    if score <= 4 and not getattr(result, "cvd_divergence", 0):
-                        eff_capital = self._capital_pct / 2
-                        log.info(f"{pair}: weak combo (no CVD/L2, {score}/7) "
-                                 f"→ half size {eff_capital:.2f}% (from {self._capital_pct:.2f}%)")
                     log.info(f">>> TRADE SIGNAL: {pair} {result.signal_direction.upper()} "
                              f"score={score}/7 positions={open_count+1} price={self._md.get_price(pair)}")
                     task = asyncio.create_task(
