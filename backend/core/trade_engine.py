@@ -411,6 +411,15 @@ class TradeEngine:
             sl_price = entry_price + sl_entry_dist
             tp_price = entry_price - tp_dist
 
+        # Round to the exchange's actual tradable price tick — without this, TP/SL
+        # sit at a theoretical price the market can never exactly reach (only display-
+        # rounds to look equal), so the monitor's >=/<= check never fires and the
+        # position rides past target instead of closing.
+        symbol_prec = pair + "USDT" if not pair.endswith("USDT") else pair
+        price_prec  = PRICE_PRECISION.get(symbol_prec, 4)
+        sl_price    = round(sl_price, price_prec)
+        tp_price    = round(tp_price, price_prec)
+
         # Entry fee (taker 0.05%) on position size
         entry_fee    = sizing["position_size_usd"] * TAKER_FEE_RATE
         total_fee_est = entry_fee * 2  # entry + exit
@@ -678,10 +687,10 @@ class TradeEngine:
         if not self._open[pair]:
             del self._open[pair]
 
-        # SL cooldown — set on SL exit to block re-entry for 20 min
-        if reason == "sl":
+        # Post-exit cooldown — set on SL or TP exit to block re-entry for 20 min
+        if reason in ("sl", "tp"):
             self._sl_cooldown[pair] = time.time()
-            log.info(f"{pair}: SL cooldown started — no re-entry for 20 min")
+            log.info(f"{pair}: post-exit cooldown started ({reason.upper()}) — no re-entry for 20 min")
 
         # ── Live: Close position on Binance ──────────────────
         if self.mode == "live" and self._binance:

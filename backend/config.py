@@ -129,9 +129,9 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        1.0,   # reverted 2026-07-10 — back to full 1R stop (was 0.75x,
-                                 # tried tighter but reverted per user request). SL-out
-                                 # now reports -1.00R again.
+    "sl_entry_r":        2.0,   # widened 2026-07-13 from 1.0 → 2.0 per user request.
+                                 # SL and TP both now sit at 2× the ATR-based 1R distance,
+                                 # so SL-out reports -2.00R and TP-out reports +2.00R.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
