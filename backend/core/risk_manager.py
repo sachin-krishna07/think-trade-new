@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, Tuple
 
 from config import (
@@ -10,29 +11,57 @@ import core.supabase_client as db
 
 log = logging.getLogger("risk_manager")
 
-# Trade modes — loss-triggered cooldown removed, bot always trades at full capacity.
+# Trade modes — loss-triggered mode switching removed, bot always trades at full capacity.
 MODE_NORMAL = "normal"
+
+# Consecutive-loss cooldown — added 2026-07-14 per user request: 3 losses in a row
+# (regardless of wins mixed in earlier) locks out new entries for 1 hour. Existing
+# open positions are untouched. Counter resets to 0 both when the cooldown triggers
+# and when it expires, so it's always a fresh streak — the cooldown never extends.
+CONSECUTIVE_LOSS_LIMIT = 3
+LOSS_COOLDOWN_SEC      = 3600
 
 
 class RiskManager:
     def __init__(self):
         self._trade_mode: str = MODE_NORMAL
+        self._consecutive_losses: int = 0
+        self._loss_cooldown_until: float = 0.0
 
     def reset(self):
         """Fresh start on bot restart."""
         self._trade_mode = MODE_NORMAL
+        self._consecutive_losses = 0
+        self._loss_cooldown_until = 0.0
         log.info("Risk manager reset — fresh start")
 
     def record_trade_result(self, pnl: float, mode: str):
-        """Called after every trade closes. Loss-window cooldown removed — no mode
-        changes happen here anymore, this is purely informational logging."""
+        """Called after every trade closes. Tracks consecutive losses and triggers
+        a 1-hour new-entry cooldown after CONSECUTIVE_LOSS_LIMIT losses in a row."""
         if pnl >= 0:
             log.info(f"✅ Trade closed in profit (pnl={pnl:.2f})")
-        else:
-            log.info(f"❌ Trade closed in loss (pnl={pnl:.2f})")
+            self._consecutive_losses = 0
+            return
+
+        log.info(f"❌ Trade closed in loss (pnl={pnl:.2f})")
+        self._consecutive_losses += 1
+
+        if self._consecutive_losses >= CONSECUTIVE_LOSS_LIMIT:
+            self._loss_cooldown_until = time.time() + LOSS_COOLDOWN_SEC
+            self._consecutive_losses = 0
+            log.warning(
+                f"🛑 {CONSECUTIVE_LOSS_LIMIT} consecutive losses — new entries locked "
+                f"for {LOSS_COOLDOWN_SEC // 60} min"
+            )
 
     def check(self, mode: str, wallet: Dict) -> Tuple[bool, str]:
         """Returns (allowed, reason). Called before every trade entry."""
+        # ── 1. Consecutive-loss cooldown ─────────────────────────
+        remaining = self._loss_cooldown_until - time.time()
+        if remaining > 0:
+            mins, secs = divmod(int(remaining), 60)
+            return False, f"Loss-streak cooldown active — {mins}m {secs}s remaining"
+
         # ── 3. Daily loss limit ──────────────────────────────────
         balance  = wallet.get("balance", 0)
         initial  = wallet.get("initial_balance", balance)
@@ -56,14 +85,15 @@ class RiskManager:
         return MAX_TRADES_NORMAL
 
     def status(self) -> Dict:
-        """Snapshot for logging/broadcast. Cooldown fields kept (always empty) so
-        the frontend risk-status shape stays unchanged."""
+        """Snapshot for logging/broadcast."""
+        remaining = self._loss_cooldown_until - time.time()
+        active    = remaining > 0
         return {
             "trade_mode":             self._trade_mode,
             "max_trades":             self.max_trades(),
-            "cooldown_level":         0,
-            "cooldown_remaining_sec": None,
-            "cooldown_total_min":     None,
+            "cooldown_level":         1 if active else 0,
+            "cooldown_remaining_sec": int(remaining) if active else None,
+            "cooldown_total_min":     LOSS_COOLDOWN_SEC // 60 if active else None,
             "consecutive_wins":       0,
         }
 
