@@ -399,10 +399,10 @@ class TradeEngine:
         # anchored to sl_dist, so an SL-out reports sl_entry_r, e.g. -0.75R, not -1.00R).
         sl_entry_dist = sl_dist * cfg.get("sl_entry_r", 1.0)
 
-        # Fixed 1:1 R:R — TP at +1R, no trailing SL (removed 2026-07-10 per user
-        # request). TP distance matches the actual SL distance, not the full 1R
-        # risk_amount reference, so TP lands exactly where SL would if it were at 1R.
-        tp_dist = sl_entry_dist
+        # TP is independent of SL (changed 2026-07-14 per user request — was previously
+        # forced 1:1 with sl_entry_dist). No trailing SL (removed 2026-07-10 per user
+        # request).
+        tp_dist = sl_dist * cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
 
         if direction == "long":
             sl_price = entry_price - sl_entry_dist
@@ -634,7 +634,7 @@ class TradeEngine:
                     }
                 })
 
-                # ── Exit conditions — fixed SL (-1R) / fixed TP (+1R), no trailing ──
+                # ── Exit conditions — fixed SL (sl_entry_r) / fixed TP (tp_entry_r), no trailing ──
                 exit_reason = None
                 if direction == "long":
                     if current_price <= sl_price:

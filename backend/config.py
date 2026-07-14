@@ -129,9 +129,10 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        2.0,   # widened 2026-07-13 from 1.0 → 2.0 per user request.
-                                 # SL and TP both now sit at 2× the ATR-based 1R distance,
-                                 # so SL-out reports -2.00R and TP-out reports +2.00R.
+    "sl_entry_r":        1.5,   # changed 2026-07-14 from 2.0 → 1.5 per user request.
+                                 # SL-out now reports -1.50R.
+    "tp_entry_r":        2.5,   # changed 2026-07-14 — TP now independent of SL, sits at
+                                 # 2.5× the ATR-based 1R distance, so TP-out reports +2.50R.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
@@ -178,7 +179,7 @@ MAX_DAILY_LOSS_PCT       = 100.0
 MAX_WEEKLY_DRAWDOWN_PCT  = 100.0
 
 # Max simultaneous trades
-MAX_TRADES_NORMAL = 5
+MAX_TRADES_NORMAL = 7
 
 MAX_LEVERAGE             = 20.0  # hard ceiling — user can never go above this
 DEFAULT_LEVERAGE         = 5.0   # default if user doesn't specify
