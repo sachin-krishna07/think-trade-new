@@ -57,6 +57,15 @@ PRICE_PRECISION = {
 }
 
 
+def get_price_precision(symbol: str) -> int:
+    """Shared lookup for SL/TP price rounding. PRICE_PRECISION is populated from
+    Binance's real tick sizes at bot startup (see TradeEngine.sync_live_balance) —
+    the hardcoded table above and the `4` fallback here are last-resort only.
+    A flat 4-decimal fallback badly distorts SL/TP for sub-cent tokens (confirmed
+    bug on ALT/PENGU/SKL — 0.0001 tick was coarser than the intended R-distance)."""
+    return PRICE_PRECISION.get(symbol, 4)
+
+
 class BinanceFutures:
     """Thin async wrapper around Binance USDT-M Futures REST API."""
 
@@ -131,7 +140,7 @@ class BinanceFutures:
         Uses MARK_PRICE to prevent immediate trigger on spreads/spikes.
         quantity param kept for call-site compatibility but NOT sent to Binance —
         closePosition and quantity/reduceOnly are mutually exclusive on /fapi/v1/order."""
-        price_prec = PRICE_PRECISION.get(symbol, 4)
+        price_prec = get_price_precision(symbol)
         return await self._request("POST", "/fapi/v1/order", {
             "symbol":        symbol,
             "side":          side,
@@ -145,7 +154,7 @@ class BinanceFutures:
         """Place TAKE_PROFIT_MARKET order — closePosition=true closes full position on trigger.
         Uses MARK_PRICE to prevent premature trigger.
         quantity param kept for call-site compatibility but NOT sent to Binance."""
-        price_prec = PRICE_PRECISION.get(symbol, 4)
+        price_prec = get_price_precision(symbol)
         return await self._request("POST", "/fapi/v1/order", {
             "symbol":        symbol,
             "side":          side,
@@ -304,26 +313,39 @@ class TradeEngine:
         log.info(f"Wallet loaded: ${self._balance:.2f} ({self.mode})")
 
     async def sync_live_balance(self):
-        """Live mode: sync actual Binance futures balance + precision into _balance."""
-        if self.mode != "live" or not self._binance:
-            return
-        try:
-            bal = await self._binance.get_account_balance()
-            binance_bal = bal.get("futures_usdt", 0)
-            if binance_bal > 0:
-                self._balance         = binance_bal
-                self._initial_balance = binance_bal
-                log.info(f"Live balance synced from Binance: ${binance_bal:.2f}")
-        except Exception as e:
-            log.warning(f"Binance balance sync failed: {e}")
+        """Live mode: sync actual Binance futures balance into _balance."""
+        if self.mode == "live" and self._binance:
+            try:
+                bal = await self._binance.get_account_balance()
+                binance_bal = bal.get("futures_usdt", 0)
+                if binance_bal > 0:
+                    self._balance         = binance_bal
+                    self._initial_balance = binance_bal
+                    log.info(f"Live balance synced from Binance: ${binance_bal:.2f}")
+            except Exception as e:
+                log.warning(f"Binance balance sync failed: {e}")
 
-        # Auto-fetch precision from Binance — overrides hardcoded fallback
+        # Fetch real tick precision from Binance's public exchangeInfo — runs in
+        # every mode (demo included), no API key needed. Without this, symbols
+        # missing from the hardcoded PRICE_PRECISION table fall back to 4 decimals,
+        # which badly distorts SL/TP for sub-cent tokens (confirmed bug: ALT,
+        # PENGU, SKL all ran far past their intended SL/TP R-multiple because a
+        # 0.0001 tick was coarser than the intended stop distance). Merged into
+        # the global dicts here, at startup, before any trade rounds a price —
+        # not lazily per-symbol on first trade.
+        precision_client = self._binance or BinanceFutures("", "")
         try:
-            prec = await self._binance.fetch_precision()
+            prec = await precision_client.fetch_precision()
             self._qty_prec   = prec["qty"]
             self._price_prec = prec["price"]
+            SYMBOL_PRECISION.update(self._qty_prec)
+            PRICE_PRECISION.update(self._price_prec)
+            log.info(
+                f"Price/qty precision merged for {len(self._price_prec)} symbols "
+                f"(mode={self.mode})"
+            )
         except Exception as e:
-            log.warning(f"Precision fetch failed: {e}")
+            log.warning(f"Precision fetch failed — using hardcoded fallback: {e}")
 
     # ─── Enter Trade ────────────────────────────────────────
 
@@ -416,7 +438,7 @@ class TradeEngine:
         # rounds to look equal), so the monitor's >=/<= check never fires and the
         # position rides past target instead of closing.
         symbol_prec = pair + "USDT" if not pair.endswith("USDT") else pair
-        price_prec  = PRICE_PRECISION.get(symbol_prec, 4)
+        price_prec  = get_price_precision(symbol_prec)
         sl_price    = round(sl_price, price_prec)
         tp_price    = round(tp_price, price_prec)
 
@@ -460,11 +482,6 @@ class TradeEngine:
         # ── Live: Place actual Binance Futures order ──────────
         if self.mode == "live" and self._binance:
             symbol = pair + "USDT" if not pair.endswith("USDT") else pair
-
-            # Use Binance-fetched precision if available, else hardcoded fallback
-            if self._qty_prec:
-                SYMBOL_PRECISION[symbol]  = self._qty_prec.get(symbol,  SYMBOL_PRECISION.get(symbol, 2))
-                PRICE_PRECISION[symbol]   = self._price_prec.get(symbol, PRICE_PRECISION.get(symbol, 4))
 
             try:
                 # Set leverage
@@ -578,6 +595,12 @@ class TradeEngine:
         risk_amount  = pos_snapshot["risk_amount"]
         entry_time   = datetime.now(timezone.utc)
 
+        # R-multiple exit thresholds — same lookup used at entry (see enter(),
+        # sl_entry_dist/tp_dist), so the monitor's trigger always matches what
+        # was actually intended for this trade.
+        sl_r = cfg.get("sl_entry_r", 1.0)
+        tp_r = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
+
         highest_pnl = 0.0
 
         _consecutive_errors = 0  # track back-to-back errors to detect hard failures
@@ -634,29 +657,26 @@ class TradeEngine:
                     }
                 })
 
-                # ── Exit conditions — fixed SL (sl_entry_r) / fixed TP (tp_entry_r), no trailing ──
+                # ── Exit conditions — R-multiple based, not raw price ──────────────
+                # r_current's sign already encodes direction via pnl (long/short
+                # handled above), so this check is direction-agnostic. Using R
+                # instead of comparing current_price against sl_price/tp_price
+                # avoids the exchange-tick-size rounding that previously let
+                # trades run far past their intended SL/TP (confirmed bug: ALT,
+                # PENGU, SKL all missed their exit because the rounded sl_price/
+                # tp_price landed at the wrong tick for sub-cent tokens).
                 exit_reason = None
-                if direction == "long":
-                    if current_price <= sl_price:
-                        exit_reason = "sl"
-                    elif current_price >= tp_price:
-                        exit_reason = "tp"
-                else:
-                    if current_price >= sl_price:
-                        exit_reason = "sl"
-                    elif current_price <= tp_price:
-                        exit_reason = "tp"
+                if r_current <= -sl_r:
+                    exit_reason = "sl"
+                elif r_current >= tp_r:
+                    exit_reason = "tp"
 
                 if exit_reason:
-                    exit_p = sl_price if exit_reason == "sl" else tp_price
-                    if direction == "long":
-                        exit_pct = (exit_p - entry_price) / entry_price
-                    else:
-                        exit_pct = (entry_price - exit_p) / entry_price
-                    exit_pnl = exit_pct * pos_size_usd
-
+                    # Use the actual current price/pnl at trigger time, not the
+                    # theoretical sl_price/tp_price target — more accurate and
+                    # immune to any remaining price-rounding distortion.
                     await self._close_position(pair, trade_id, position_id, pos_snapshot,
-                                               exit_p, exit_pnl, exit_pct, risk_amount,
+                                               current_price, pnl, pnl_pct, risk_amount,
                                                exit_reason, entry_time)
                     return
 
@@ -940,7 +960,7 @@ class TradeEngine:
                     tp_price = entry_price - tp_dist
 
                 # Round prices to symbol precision
-                price_prec = PRICE_PRECISION.get(symbol, 4)
+                price_prec = get_price_precision(symbol)
                 sl_price   = round(sl_price,  price_prec)
                 tp_price   = round(tp_price,  price_prec)
 
@@ -1022,9 +1042,16 @@ class TradeEngine:
                         "_entry_time": datetime.now(timezone.utc),
                     }
 
-                    # Start software position monitor (trailing, -1R exit, etc.)
+                    # Start software position monitor. This path's risk_amount IS the
+                    # actual placed SL distance (sl_dist * quantity) and tp_dist is a
+                    # fixed 2x that — a 1R/2R relationship, NOT the SCALPING cfg's
+                    # sl_entry_r/tp_entry_r (which are multiples of a separate ATR-based
+                    # reference distance). Override so the R-based exit check matches
+                    # what was actually placed on Binance, instead of the primary
+                    # entry path's thresholds.
+                    orphan_cfg = {**SCALPING, "sl_entry_r": 1.0, "tp_entry_r": 2.0}
                     monitor_task = asyncio.create_task(
-                        self._monitor_position(pair, "scalping", SCALPING, trade_id, pos_id, pos_snapshot)
+                        self._monitor_position(pair, "scalping", orphan_cfg, trade_id, pos_id, pos_snapshot)
                     )
                     entry_record = {
                         "trade_id":     trade_id,

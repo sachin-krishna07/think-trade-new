@@ -131,8 +131,9 @@ SCALPING = {
     "atr_sl_mult":       1.35,
     "sl_entry_r":        1.5,   # changed 2026-07-14 from 2.0 → 1.5 per user request.
                                  # SL-out now reports -1.50R.
-    "tp_entry_r":        2.5,   # changed 2026-07-14 — TP now independent of SL, sits at
-                                 # 2.5× the ATR-based 1R distance, so TP-out reports +2.50R.
+    "tp_entry_r":        2.0,   # changed 2026-07-15 from 2.5 → 2.0 per user request.
+                                 # TP is independent of SL, sits at 2.0× the ATR-based
+                                 # 1R distance, so TP-out reports +2.00R.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
