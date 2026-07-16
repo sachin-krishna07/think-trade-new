@@ -129,11 +129,15 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        1.5,   # changed 2026-07-14 from 2.0 → 1.5 per user request.
-                                 # SL-out now reports -1.50R.
-    "tp_entry_r":        2.0,   # changed 2026-07-15 from 2.5 → 2.0 per user request.
-                                 # TP is independent of SL, sits at 2.0× the ATR-based
-                                 # 1R distance, so TP-out reports +2.00R.
+    "sl_entry_r":        2.0,   # changed 2026-07-17 from 1.5 → 2.0 per user request.
+                                 # SL-out now reports -2.00R.
+    "tp_entry_r":        2.75,  # changed 2026-07-17 from 2.0 → 2.75 — Version-2.0 trade
+                                 # history (683 trades) showed fee ~17% of risk_amount per
+                                 # trade; at 1.5R SL / 2.0R TP the breakeven WR is 42.9%,
+                                 # too close to the observed ~40-51% range. 2.75R TP moves
+                                 # breakeven to ~35.3%, giving margin even at 40% WR.
+                                 # TP is independent of SL, sits at 2.75× the ATR-based
+                                 # 1R distance, so TP-out reports +2.75R.
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping

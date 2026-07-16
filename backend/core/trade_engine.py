@@ -446,8 +446,12 @@ class TradeEngine:
         entry_fee    = sizing["position_size_usd"] * TAKER_FEE_RATE
         total_fee_est = entry_fee * 2  # entry + exit
 
-        # Gate: risk must be at least 3× total fee
-        if sizing["risk_amount"] < total_fee_est * 3.0:
+        # Gate: risk must be at least 5× total fee. Tuned 2026-07-17 from a
+        # last-5-days trade-history sweep (365 trades): the ratio 3-5 band
+        # (fee ~20-33% of R) was net -$11k while ratio>=5 was net +$13.7k.
+        # 5x maximised net across thresholds (beat 4x and 6x), so it caps fee
+        # at ~1/5R and drops only the high-fee-drag entries.
+        if sizing["risk_amount"] < total_fee_est * 5.0:
             log.info(f"{pair}: skipped — risk ₹{sizing['risk_amount']:.1f} too small vs fee ₹{total_fee_est:.1f}")
             # Same setup will fail this exact check every scan cycle until the
             # signal itself changes — cooldown it so it doesn't spam-retry.
