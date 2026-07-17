@@ -129,15 +129,15 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        2.0,   # changed 2026-07-17 from 1.5 → 2.0 per user request.
-                                 # SL-out now reports -2.00R.
-    "tp_entry_r":        2.75,  # changed 2026-07-17 from 2.0 → 2.75 — Version-2.0 trade
-                                 # history (683 trades) showed fee ~17% of risk_amount per
-                                 # trade; at 1.5R SL / 2.0R TP the breakeven WR is 42.9%,
-                                 # too close to the observed ~40-51% range. 2.75R TP moves
-                                 # breakeven to ~35.3%, giving margin even at 40% WR.
-                                 # TP is independent of SL, sits at 2.75× the ATR-based
-                                 # 1R distance, so TP-out reports +2.75R.
+    "sl_entry_r":        1.0,   # changed 2026-07-17 from 2.0 → 1.0 per user request.
+                                 # SL-out now reports -1.00R.
+    "tp_entry_r":        1.75,  # changed 2026-07-17 from 2.75 → 1.75 per user request.
+                                 # TP-out reports +1.75R. Breakeven WR after ~0.17R fee ≈ 42.5%.
+    # Breakeven lock: once peak R hits be_trigger_r, the stop jumps to be_stop_r
+    # (+0.2R — covers the ~0.17R round-trip fee, so a stop-out there is a tiny net
+    # gain, not a scratch loss). Set be_trigger_r to None to disable the move.
+    "be_trigger_r":      1.5,
+    "be_stop_r":         0.2,
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
@@ -192,5 +192,8 @@ MIN_SIGNAL_SCORE         = 4    # minimum layers out of 7
 
 # ─── Bot internals ──────────────────────────────────────────
 SIGNAL_BROADCAST_INTERVAL = 2   # seconds between WS broadcasts
-POSITION_CHECK_INTERVAL   = 0.5 # seconds between position monitor ticks
+POSITION_CHECK_INTERVAL   = 0.2 # seconds between position monitor ticks (0.5→0.2 on
+                                # 2026-07-17 to cut SL/TP exit overshoot on volatile coins.
+                                # Reads local WS price (last_price dict), NOT Binance REST —
+                                # so no extra exchange API load.
 KLINE_HISTORY_LIMIT       = 150 # candles to fetch on startup

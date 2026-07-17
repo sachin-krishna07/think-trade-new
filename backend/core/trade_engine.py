@@ -604,8 +604,13 @@ class TradeEngine:
         # was actually intended for this trade.
         sl_r = cfg.get("sl_entry_r", 1.0)
         tp_r = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
+        be_trigger_r = cfg.get("be_trigger_r")   # None = breakeven lock disabled
+        be_stop_r    = cfg.get("be_stop_r", 0.0)
 
         highest_pnl = 0.0
+        highest_r    = 0.0     # peak R reached — arms the breakeven stop move
+        be_armed     = False   # True once highest_r >= be_trigger_r
+        _last_db_write = 0.0  # ts of last DB position write — time-based throttle below
 
         _consecutive_errors = 0  # track back-to-back errors to detect hard failures
 
@@ -629,8 +634,20 @@ class TradeEngine:
                 highest_pnl = max(highest_pnl, pnl)
                 r_current = pnl / risk_amount if risk_amount > 0 else 0
 
-                # Update position in DB (every 5 checks to reduce writes)
-                if int(elapsed * 2) % 10 == 0:
+                # Breakeven lock: once peak R reaches be_trigger_r, raise the stop to
+                # be_stop_r (+0.2R) so this trade can no longer close for a loss.
+                if r_current > highest_r:
+                    highest_r = r_current
+                if be_trigger_r is not None and not be_armed and highest_r >= be_trigger_r:
+                    be_armed = True
+                    log.info(f"{pair}: breakeven armed at +{highest_r:.2f}R — stop -> +{be_stop_r:.2f}R")
+
+                # Update position in DB every ~5s. Time-based so it's independent of
+                # POSITION_CHECK_INTERVAL — the old int(elapsed*2)%10 hack assumed 0.5s
+                # ticks and would fire repeatedly at the new 0.2s interval.
+                _now = time.time()
+                if _now - _last_db_write >= 5.0:
+                    _last_db_write = _now
                     try:
                         await asyncio.to_thread(
                             db.update_position,
@@ -670,10 +687,13 @@ class TradeEngine:
                 # PENGU, SKL all missed their exit because the rounded sl_price/
                 # tp_price landed at the wrong tick for sub-cent tokens).
                 exit_reason = None
-                if r_current <= -sl_r:
-                    exit_reason = "sl"
-                elif r_current >= tp_r:
+                if r_current >= tp_r:
                     exit_reason = "tp"
+                elif be_armed and r_current <= be_stop_r:
+                    # breakeven lock hit — trade reached be_trigger_r then pulled back
+                    exit_reason = "breakeven"
+                elif not be_armed and r_current <= -sl_r:
+                    exit_reason = "sl"
 
                 if exit_reason:
                     # Use the actual current price/pnl at trigger time, not the
