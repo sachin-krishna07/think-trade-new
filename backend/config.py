@@ -134,10 +134,10 @@ SCALPING = {
     "tp_entry_r":        3.5,   # changed 2026-07-17 from 2.2 → 3.5 per user request.
                                  # TP-out reports +3.50R.
     # Breakeven lock: once peak R hits be_trigger_r, the stop jumps to be_stop_r
-    # (+0.2R — covers the ~0.17R round-trip fee, so a stop-out there is a tiny net
-    # gain, not a scratch loss). Set be_trigger_r to None to disable the move.
-    "be_trigger_r":      1.5,
-    "be_stop_r":         0.2,
+    # (+0.5R — well above the ~0.17R round-trip fee, so a stop-out there locks a
+    # real net gain, not just breakeven). Set be_trigger_r to None to disable.
+    "be_trigger_r":      1.6,
+    "be_stop_r":         0.5,
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
