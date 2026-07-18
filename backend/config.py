@@ -129,10 +129,10 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        1.5,   # changed 2026-07-17 from 1.0 → 1.5 per user request.
-                                 # SL-out now reports -1.50R.
-    "tp_entry_r":        2.2,   # changed 2026-07-17 from 1.75 → 2.2 per user request.
-                                 # TP-out reports +2.20R.
+    "sl_entry_r":        2.5,   # changed 2026-07-17 from 1.5 → 2.5 per user request.
+                                 # SL-out now reports -2.50R.
+    "tp_entry_r":        3.5,   # changed 2026-07-17 from 2.2 → 3.5 per user request.
+                                 # TP-out reports +3.50R.
     # Breakeven lock: once peak R hits be_trigger_r, the stop jumps to be_stop_r
     # (+0.2R — covers the ~0.17R round-trip fee, so a stop-out there is a tiny net
     # gain, not a scratch loss). Set be_trigger_r to None to disable the move.
