@@ -411,12 +411,12 @@ class TradeEngine:
             user_leverage=self.leverage
         )
 
-        # Un-reversed 2026-07-17 per user request — execute the signal engine's own
-        # direction. (It was flipped on 2026-07-10; a 5-day real-candle backtest
-        # still favoured the flipped side (-0.023R/trade vs -0.380R un-reversed),
-        # but the signal's directional bias is regime-dependent and inverted again
-        # on 2026-07-17, so we trade the signal as-is now.)
-        direction = signal.signal_direction
+        # Reversed — execute the OPPOSITE of what the signal engine detects. All 7
+        # layers + L8 still score/gate the TRUE direction above; only the executed
+        # side flips here. (Flipped 2026-07-10; briefly un-reversed 2026-07-17 but
+        # that ran 18.8% WR / -$13.8k live same day, and a 5-day real-candle backtest
+        # favoured the flip -0.023R/trade vs -0.380R un-reversed — so re-reversed.)
+        direction = "short" if signal.signal_direction == "long" else "long"
         sl_dist   = sizing["sl_distance"]
 
         # Actual SL is placed tighter than the full 1R distance (risk_amount stays
