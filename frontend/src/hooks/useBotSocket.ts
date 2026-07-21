@@ -84,6 +84,7 @@ export interface BotState {
   running: boolean;
   mode: string;
   style: string;
+  reverseDirection: boolean;
   pairs: string[];
   signals: Record<string, SignalData>;
   positions: Record<string, PositionData>;
@@ -98,6 +99,7 @@ const initialState: BotState = {
   running: false,
   mode: "demo",
   style: "scalping",
+  reverseDirection: false,
   pairs: [],
   signals: {},
   positions: {},
@@ -161,6 +163,7 @@ export function useBotSocket() {
           running:   msg.data.running,
           mode:      msg.data.mode,
           style:     msg.data.style,
+          reverseDirection: msg.data.reverse_direction ?? s.reverseDirection,
           pairs:     msg.data.pairs || [],
           signals:   msg.data.signals || {},
           wallet:    msg.data.wallet,
@@ -237,6 +240,7 @@ export function useBotSocket() {
           running: msg.data.running,
           mode: msg.data.mode || s.mode,
           style: msg.data.style || s.style,
+          reverseDirection: msg.data.reverse_direction ?? s.reverseDirection,
           pairs: msg.data.pairs || s.pairs,
         }));
         // If bot just started, poll REST as a safety net in case WS signal_updates
@@ -288,6 +292,9 @@ export function useBotSocket() {
     style: string;
     pairs: string[];
     capital_pct: number;
+    leverage?: number;
+    trader_name?: string;
+    reverse_direction?: boolean;
   }) => {
     const r = await fetch(`${API_URL}/api/bot/start`, {
       method: "POST",

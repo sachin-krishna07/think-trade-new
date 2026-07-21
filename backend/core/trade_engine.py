@@ -254,12 +254,18 @@ class BinanceFutures:
 
 
 class TradeEngine:
-    def __init__(self, risk: RiskManager, on_update: Callable, mode: str = "demo", leverage: float = 5.0, trader_name: str = "Unknown"):
+    def __init__(self, risk: RiskManager, on_update: Callable, mode: str = "demo", leverage: float = 5.0,
+                 trader_name: str = "Unknown", reverse_direction: bool = False):
         self.risk        = risk
         self.on_update   = on_update
         self.mode        = mode
         self.leverage    = leverage
         self.trader_name = trader_name
+        # Trade the opposite of the signal engine's direction. Set per-run from the
+        # frontend "Reverse Direction" toggle (see bot_controller.start()) — this is
+        # separate from the 2026-07 reverse-execution experiment that was tried and
+        # reverted in code; this is a user-controlled runtime switch, not a default.
+        self.reverse_direction = reverse_direction
 
         # Binance Futures client (only used in live mode)
         self._binance: Optional[BinanceFutures] = None
@@ -414,6 +420,8 @@ class TradeEngine:
         # Trade the signal engine's own direction (no reversal). The 2026-07-10 flip
         # was removed 2026-07-17 per user request.
         direction = signal.signal_direction
+        if self.reverse_direction:
+            direction = "short" if direction == "long" else "long"
         sl_dist   = sizing["sl_distance"]
 
         # Actual SL is placed tighter than the full 1R distance (risk_amount stays

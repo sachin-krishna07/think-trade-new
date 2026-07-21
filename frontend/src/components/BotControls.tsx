@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio } from "lucide-react";
+import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio, Repeat } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
 import {
   Dialog,
@@ -31,6 +31,7 @@ interface Props {
   running: boolean;
   mode: string;
   style: string;
+  reverseDirection: boolean;  // server truth — what the running bot is actually using
   onStart: (cfg: any) => Promise<void>;
   onStop: () => Promise<void>;
   onForceClose: () => Promise<void>;
@@ -39,6 +40,7 @@ interface Props {
 }
 
 export default function BotControls({ running, mode: curMode, style: curStyle,
+  reverseDirection: curReverseDirection,
   onStart, onStop, onForceClose, hasPosition, walletBalance }: Props) {
   const actionPin = import.meta.env.VITE_BOT_ACTION_PIN;
 
@@ -55,6 +57,8 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   });
   const [capitalPct, setCapitalPct] = useState(() => localStorage.getItem("bot_capital") || "1");
   const [leverage, setLeverage]     = useState(() => localStorage.getItem("bot_leverage") || "5");
+  // Pre-start config only — once running, the badge below shows curReverseDirection (server truth) instead.
+  const [reverseDirectionCfg, setReverseDirectionCfg] = useState(() => localStorage.getItem("bot_reverse") === "true");
   const [loading, setLoading]       = useState(false);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"start" | "stop" | null>(null);
@@ -92,6 +96,13 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
   const handleSetStyle = (s: string) => { setStyle(s); localStorage.setItem("bot_style", s); };
   const handleSetCapital = (v: string) => { setCapitalPct(v); localStorage.setItem("bot_capital", v); };
   const handleSetLeverage = (v: string) => { setLeverage(v); localStorage.setItem("bot_leverage", v); };
+  const handleToggleReverse = () => {
+    setReverseDirectionCfg((prev) => {
+      const next = !prev;
+      localStorage.setItem("bot_reverse", String(next));
+      return next;
+    });
+  };
 
   const handleStart = async () => {
     const pct = parseFloat(capitalPct);
@@ -109,7 +120,10 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
       setLoading(true);
       const lev = Math.min(Math.max(parseFloat(leverage) || 5, 1), 20);
       const traderName = import.meta.env.VITE_TRADER_NAME || "Unknown";
-      await onStart({ mode, style, pairs, capital_pct: pct, leverage: lev, trader_name: traderName });
+      await onStart({
+        mode, style, pairs, capital_pct: pct, leverage: lev, trader_name: traderName,
+        reverse_direction: reverseDirectionCfg,
+      });
       // Don't clear loading here — wait for running=true via WebSocket (useEffect above)
     } catch {
       setLoading(false);
@@ -183,6 +197,14 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
               {curStyle === "scalping" ? "Scalping" : "Swing"}
             </div>
           </div>
+          {curReverseDirection && (
+            <div className="flex-1 bg-[#111827] border border-orange-500/30 rounded-lg px-3 py-2 text-center">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Direction</div>
+              <div className="flex items-center justify-center gap-1 text-xs font-bold text-orange-300">
+                <Repeat size={11} /> Reversed
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* ── Bot stopped: show full mode + style + pairs ── */
@@ -241,6 +263,23 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
                 ? "2–8 min holds · 15m trend · 5m entry · RSI-2 signals"
                 : "Hours–days · 4h trend · 1h entry · RSI-14 signals"}
             </p>
+          </div>
+
+          <div className="h-px bg-[#1e2433]" />
+
+          {/* Reverse Direction */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Execution Direction</label>
+            <button
+              onClick={handleToggleReverse}
+              className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-all ${
+                reverseDirectionCfg
+                  ? "bg-orange-500/15 border border-orange-500/40 text-orange-300"
+                  : "bg-[#111827] border border-[#1e2433] text-gray-600 hover:text-gray-300 hover:border-[#2a3045]"
+              }`}>
+              <Repeat size={11} />
+              {reverseDirectionCfg ? "Reversed — takes OPPOSITE of signal" : "Normal — takes signal's own direction"}
+            </button>
           </div>
 
           <div className="h-px bg-[#1e2433]" />

@@ -25,6 +25,7 @@ class BotController:
         self._pairs:        List[str] = []
         self._capital_pct:  float = 1.0
         self._leverage:     float = 5.0
+        self._reverse_direction: bool = False
 
         self._broadcast_cb: Optional[Callable] = None
         self._tasks:        List[asyncio.Task] = []
@@ -36,7 +37,7 @@ class BotController:
 
     async def start(self, mode: str, style: str, pairs: List[str],
                     capital_pct: float, broadcast_cb: Callable, leverage: float = 5.0,
-                    trader_name: str = "Unknown"):
+                    trader_name: str = "Unknown", reverse_direction: bool = False):
         if self._running:
             log.warning("Bot already running")
             return
@@ -47,10 +48,12 @@ class BotController:
         self._capital_pct = capital_pct
         self._leverage    = leverage
         self._trader_name = trader_name
+        self._reverse_direction = reverse_direction
         self._broadcast_cb = broadcast_cb
         self._running     = True
 
-        log.info(f"Bot starting | mode={mode} style={style} pairs={pairs} capital={capital_pct}% leverage={leverage}x")
+        log.info(f"Bot starting | mode={mode} style={style} pairs={pairs} capital={capital_pct}% "
+                 f"leverage={leverage}x reverse_direction={reverse_direction}")
 
         # Update DB config
         db.update_bot_config(
@@ -65,6 +68,7 @@ class BotController:
             mode=mode,
             leverage=leverage,
             trader_name=trader_name,
+            reverse_direction=reverse_direction,
         )
         self._engine.set_price_getter(self._md.get_price)
         self._engine.set_running(True)
@@ -99,7 +103,10 @@ class BotController:
             asyncio.create_task(self._binance_reconcile_loop()),
         ]
 
-        await self._broadcast({"type": "bot_status", "data": {"running": True, "mode": mode, "style": style, "pairs": pairs}})
+        await self._broadcast({"type": "bot_status", "data": {
+            "running": True, "mode": mode, "style": style, "pairs": pairs,
+            "reverse_direction": reverse_direction,
+        }})
         log.info("Bot started")
 
     async def stop(self):
@@ -282,6 +289,7 @@ class BotController:
             "style":        self._style,
             "pairs":        self._pairs,
             "capital_pct":  self._capital_pct,
+            "reverse_direction": self._reverse_direction,
             "wallet":       wallet,
             "signals":      self._last_signals,
             "has_position": self._engine.has_open_position() if self._engine else False,

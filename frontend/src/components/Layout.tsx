@@ -51,6 +51,7 @@ export default function Layout({ children }: Props) {
             running={state.running}
             mode={state.mode}
             style={state.style}
+            reverseDirection={state.reverseDirection}
             hasPosition={positions.length > 0}
             onStart={startBot}
             onStop={stopBot}

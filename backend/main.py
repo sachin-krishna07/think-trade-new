@@ -183,6 +183,7 @@ class StartConfig(BaseModel):
     capital_pct: float = 1.0
     leverage:    float = 5.0
     trader_name: str   = "Unknown"
+    reverse_direction: bool = False
 
 
 # ─── REST Endpoints ─────────────────────────────────────────
@@ -205,6 +206,7 @@ async def start_bot(config: StartConfig):
             broadcast_cb=broadcast,
             leverage=config.leverage,
             trader_name=config.trader_name,
+            reverse_direction=config.reverse_direction,
         )
     )
     return {"ok": True, "msg": "Bot starting..."}

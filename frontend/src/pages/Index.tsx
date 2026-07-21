@@ -115,6 +115,7 @@ export default function Index() {
             running={state.running}
             mode={state.mode}
             style={state.style}
+            reverseDirection={state.reverseDirection}
             hasPosition={positions.length > 0}
             onStart={startBot}
             onStop={stopBot}
