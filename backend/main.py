@@ -236,6 +236,15 @@ async def get_status():
     return bot.snapshot()
 
 
+@app.get("/api/adaptive")
+async def get_adaptive():
+    """Per-pair adaptive filter state — which pairs it has learned to skip."""
+    engine = getattr(bot, "_engine", None)
+    if engine is None or not hasattr(engine, "adaptive_snapshot"):
+        return {"enabled": False, "pairs": {}, "blocked": []}
+    return engine.adaptive_snapshot()
+
+
 @app.get("/api/trades")
 async def get_trades(mode: str = "demo", limit: int = 50):
     return {"trades": db.get_trades(mode, limit)}

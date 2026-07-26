@@ -90,6 +90,14 @@ class BotController:
         # Recover any positions left open from previous session (stop/start without server restart)
         await self._engine.recover_open_positions()
 
+        # Rebuild the adaptive per-pair filter from closed-trade history, so a
+        # restart doesn't forget which pairs have been losing.
+        n_adaptive = await self._engine.warm_start_adaptive()
+        if n_adaptive:
+            blocked = self._engine.adaptive_snapshot().get("blocked", [])
+            log.info(f"Adaptive filter warm-started from {n_adaptive} trades"
+                     + (f" — currently blocking: {', '.join(blocked)}" if blocked else ""))
+
         # Live mode: immediately reconcile with Binance — catch orphan positions not in DB
         # (e.g. entry executed on Binance but Supabase write failed due to server disconnect)
         if self._mode == "live":

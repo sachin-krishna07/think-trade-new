@@ -20,6 +20,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.history/
 
+# VS Code Local History — keeps timestamped copies of edited files, including
+# old .env snapshots with real keys. Must never be committed.
+.history/
+
 # IDE
 .vscode/
 .idea/

@@ -135,6 +135,24 @@ def get_trades(mode: str, limit: int = 50) -> list:
         .execute()
     return result.data or []
 
+def get_closed_for_adaptive(mode: str, trader_name: str = "", limit: int = 600) -> list:
+    """Closed trades (oldest first) for warm-starting the adaptive per-pair filter.
+
+    Returns pair / net_pnl / risk_amount so the caller can compute net R. Scoped
+    to trader_name when given — the trades table is shared by more than one bot
+    instance, and mixing them would poison the per-pair stats.
+    """
+    q = get_client().table("trades")\
+        .select("pair,net_pnl,risk_amount,exit_time")\
+        .eq("mode", mode)\
+        .eq("status", "closed")
+    if trader_name:
+        q = q.eq("trader_name", trader_name)
+    result = q.order("exit_time", desc=True).limit(limit).execute()
+    rows = result.data or []
+    rows.reverse()          # oldest first, so the rolling window ends up correct
+    return rows
+
 def count_consecutive_losses(mode: str) -> int:
     result = get_client().table("trades")\
         .select("pnl")\

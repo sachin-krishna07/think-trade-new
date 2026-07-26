@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import aiohttp
 import websockets
 
-from config import BINANCE_REST_BASE, BINANCE_WS_BASE, PAIRS, SCALPING, SWING
+from config import BINANCE_REST_BASE, BINANCE_WS_BASE, PAIRS, SCALPING, SWING, style_cfg
 
 log = logging.getLogger("market_data")
 
@@ -80,7 +80,7 @@ class MarketDataManager:
         return self.last_price.get(pair, 0.0)
 
     def is_ready(self, pair: str, style: str) -> bool:
-        cfg = SCALPING if style == "scalping" else SWING
+        cfg = style_cfg(style)
         confirm_tfs = cfg.get("confirm_tfs", [cfg["trend_tf"], cfg["entry_tf"]])
         return all(len(self.candles[pair][tf]) >= 50 for tf in confirm_tfs)
 
@@ -106,7 +106,7 @@ class MarketDataManager:
     # ─── Historical Fetch ────────────────────────────────────
 
     async def _fetch_historical(self, pairs: List[str], style: str):
-        cfg = SCALPING if style == "scalping" else SWING
+        cfg = style_cfg(style)
         confirm_tfs = cfg.get("confirm_tfs", [cfg["trend_tf"], cfg["entry_tf"]])
         bias_tf     = cfg.get("bias_tf")
         tfs = list(dict.fromkeys(confirm_tfs + ([bias_tf] if bias_tf else [])))  # deduplicate, preserve order
@@ -152,7 +152,7 @@ class MarketDataManager:
     # ─── WebSocket Loop ─────────────────────────────────────
 
     async def _ws_loop(self, pairs: List[str], style: str):
-        cfg = SCALPING if style == "scalping" else SWING
+        cfg = style_cfg(style)
         confirm_tfs = cfg.get("confirm_tfs", [cfg["trend_tf"], cfg["entry_tf"]])
         bias_tf     = cfg.get("bias_tf")
         tfs = list(dict.fromkeys(confirm_tfs + ([bias_tf] if bias_tf else [])))  # deduplicate, preserve order

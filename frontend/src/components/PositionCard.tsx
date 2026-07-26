@@ -127,7 +127,13 @@ export default function PositionCard({ position, lastTrade, onForceClose }: Prop
         </div>
         <div className="bg-[#111827] border border-[#1e2433] rounded-lg p-2 text-center">
           <div className="text-gray-600 mb-1 text-[10px] uppercase tracking-wider">Target</div>
-          <div className="text-yellow-400 font-mono font-medium">{position.tp?.toFixed(4)}</div>
+          {position.has_hard_tp === false ? (
+            <div className="text-purple-400 font-medium text-[11px]" title="No fixed target — trailing stop is the only profit exit">
+              Trailing
+            </div>
+          ) : (
+            <div className="text-yellow-400 font-mono font-medium">{position.tp?.toFixed(4)}</div>
+          )}
         </div>
       </div>
 
@@ -154,14 +160,14 @@ export default function PositionCard({ position, lastTrade, onForceClose }: Prop
         <div className="flex items-center gap-1.5 text-red-400">
           <Shield size={11} />
           <span>SL: <span className="font-mono font-medium">{position.sl?.toFixed(4)}</span></span>
-          {position.trailing_sl && position.breakeven_hit && (
+          {position.trailing_sl && position.trailing_armed && (
             <span className="text-gray-600 text-[10px]">(trailing)</span>
           )}
         </div>
         <div className="flex gap-1.5">
-          {position.breakeven_hit && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-blue-400 font-semibold">
-              BREAKEVEN
+          {position.trailing_armed && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-purple-500/25 bg-purple-500/10 text-purple-400 font-semibold">
+              TRAILING
             </span>
           )}
           {position.profit_locked && (

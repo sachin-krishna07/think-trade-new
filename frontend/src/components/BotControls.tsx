@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio, Repeat } from "lucide-react";
+import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio, Repeat, Waves } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
+import { STYLE_IDS, styleMeta } from "@/lib/styles";
 import {
   Dialog,
   DialogContent,
@@ -193,8 +194,10 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
           <div className="flex-1 bg-[#111827] border border-[#1e2433] rounded-lg px-3 py-2 text-center">
             <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Style</div>
             <div className="flex items-center justify-center gap-1 text-xs font-bold text-indigo-300">
-              {curStyle === "scalping" ? <Zap size={11} /> : <TrendingUp size={11} />}
-              {curStyle === "scalping" ? "Scalping" : "Swing"}
+              {curStyle === "scalping" ? <Zap size={11} />
+                : curStyle === "swing" ? <TrendingUp size={11} />
+                : <Waves size={11} />}
+              {styleMeta(curStyle).label}
             </div>
           </div>
           {curReverseDirection && (
@@ -243,7 +246,7 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Trading Style</label>
             <div className="flex gap-2">
-              {["scalping", "swing"].map((s) => (
+              {STYLE_IDS.map((s) => (
                 <button key={s}
                   onClick={() => handleSetStyle(s)}
                   className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -252,17 +255,23 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
                       : "bg-[#111827] border border-[#1e2433] text-gray-600 hover:text-gray-300 hover:border-[#2a3045]"
                   }`}>
                   <span className="flex items-center justify-center gap-1.5">
-                    {s === "scalping" ? <Zap size={11} /> : <TrendingUp size={11} />}
-                    {s === "scalping" ? "Scalping" : "Swing"}
+                    {s === "scalping" ? <Zap size={11} />
+                      : s === "swing" ? <TrendingUp size={11} />
+                      : <Waves size={11} />}
+                    {styleMeta(s).label}
                   </span>
                 </button>
               ))}
             </div>
             <p className="text-[11px] text-gray-600 leading-relaxed">
-              {style === "scalping"
-                ? "2–8 min holds · 15m trend · 5m entry · RSI-2 signals"
-                : "Hours–days · 4h trend · 1h entry · RSI-14 signals"}
+              {styleMeta(style).blurb}
             </p>
+            {styleMeta(style).caution && (
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-400/80 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2">
+                <AlertTriangle size={11} className="flex-shrink-0 mt-0.5" />
+                <span>{styleMeta(style).caution}</span>
+              </p>
+            )}
           </div>
 
           <div className="h-px bg-[#1e2433]" />
@@ -326,6 +335,13 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
               />
               <span className="text-gray-500 text-xs">%</span>
             </div>
+            {styleMeta(running ? curStyle : style).maxCapitalPct !== undefined &&
+              Number(capitalPct) > styleMeta(running ? curStyle : style).maxCapitalPct! && (
+              <p className="text-[10px] text-amber-400/80 leading-snug">
+                Backend will cap this to {styleMeta(running ? curStyle : style).maxCapitalPct}%
+                — the wide stop makes each trade risk ~3× a scalping trade.
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <div className="text-[10px] text-gray-600">Leverage (max 20x)</div>

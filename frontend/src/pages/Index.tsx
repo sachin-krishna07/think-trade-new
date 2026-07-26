@@ -5,6 +5,7 @@ import SignalPanel from "@/components/SignalPanel";
 import WalletCard from "@/components/WalletCard";
 import PositionCard from "@/components/PositionCard";
 import PerfStats from "@/components/PerfStats";
+import AdaptivePanel from "@/components/AdaptivePanel";
 import AppHeader from "@/components/AppHeader";
 import { Clock, TrendingUp, TrendingDown, ChevronUp, ChevronDown, Activity } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
@@ -130,6 +131,7 @@ export default function Index() {
             : <PositionCard position={null} lastTrade={state.lastTrade} onForceClose={() => forceClose()} />
           }
           <PerfStats mode={state.mode || "demo"} />
+          <AdaptivePanel running={state.running} />
         </aside>
 
         {/* Main Panel */}
@@ -163,6 +165,7 @@ export default function Index() {
             selectedPairs={state.running ? undefined : []}
             running={state.running}
             knownPairs={state.pairs}
+            style={state.style}
           />
         </main>
 
@@ -290,7 +293,7 @@ export default function Index() {
                           </td>
                           <td className="px-3 py-3">
                             <div className="flex items-center gap-1">
-                              {p.trailing_sl && p.breakeven_hit ? (
+                              {p.trailing_sl && p.trailing_armed ? (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/25 bg-purple-500/10 text-purple-400 font-bold">TRAIL</span>
                               ) : (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 bg-gray-800/50 text-gray-600 font-bold">OPEN</span>

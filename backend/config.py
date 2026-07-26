@@ -129,15 +129,16 @@ SCALPING = {
     "mtf_min_align":     2,               # min TFs that must agree (out of 3)
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        2.5,   # changed 2026-07-17 from 1.5 → 2.5 per user request.
-                                 # SL-out now reports -2.50R.
-    "tp_entry_r":        3.5,   # changed 2026-07-17 from 2.2 → 3.5 per user request.
-                                 # TP-out reports +3.50R.
-    # Breakeven lock: once peak R hits be_trigger_r, the stop jumps to be_stop_r
-    # (+0.5R — well above the ~0.17R round-trip fee, so a stop-out there locks a
-    # real net gain, not just breakeven). Set be_trigger_r to None to disable.
-    "be_trigger_r":      1.6,
-    "be_stop_r":         0.5,
+    "sl_entry_r":        1.0,   # changed 2026-07-26 from 2.5 → 1.0 per user request.
+                                 # SL-out now reports -1.00R.
+    "tp_entry_r":        2.5,   # changed 2026-07-26 from 3.5 → 2.5 per user request —
+                                 # this is now the hard-cap exit, not a plain TP.
+    # Continuous trailing stop: once peak R reaches trail_trigger_r, the stop
+    # becomes (peak_r - trail_gap_r) and re-tightens upward every tick as peak_r
+    # grows. Replaces the old single-shot breakeven lock (be_trigger_r/be_stop_r,
+    # removed 2026-07-26 per user request).
+    "trail_trigger_r":   1.1,
+    "trail_gap_r":       0.4,
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
@@ -155,6 +156,67 @@ SCALPING = {
     "trend_candles":     100,
     "entry_candles":     100,
 }
+
+# ─── VWAP Fade (mean reversion) ─────────────────────────────
+# Added 2026-07-27. This is NOT the 7-layer signal — it is a standalone
+# mean-reversion rule that fades stretched moves back toward VWAP:
+#     LONG  when price <= vwap_dev_pct BELOW session VWAP and RSI(5) < rsi_long
+#     SHORT when price >= vwap_dev_pct ABOVE session VWAP and RSI(5) > rsi_short
+# No trend/ADX/multi-TF gating — it deliberately trades AGAINST the move.
+#
+# Chosen after a 50-pair / 4-window candle backtest (8 Jun - 26 Jul, ~232k
+# trigger bars) that compared 6 strategy families against a random control:
+#     vwapfade  +0.022 median R/trade, 77% of its configs positive, 4/4 windows
+#     meanrev   +0.014, 65% positive
+#     trend_pb  -0.116, 0% positive   <- the 7-layer signal's family
+#     RANDOM    -0.079, 0% positive
+# Best config pooled +0.046 R/trade at CURRENT taker fees (+0.066 with maker
+# entry), 33/50 pairs net-positive, top pair only 9% of net.
+#
+# Re-validated on 1-MINUTE exit paths (5m bars are optimistic when stop and
+# target sit close together). On its WEAKEST window the 1m path moved it
+# +0.082: taker -0.089 -> -0.007, maker -0.064 -> +0.018. The wide trailing
+# stop is why finer bars help here rather than hurt.
+#
+# CAUTION - sizing: atr_sl_mult 4.5 puts sl_dist_pct around 2%, and
+# risk = position_size x sl_dist_pct. At capital_pct 20% x 10x leverage that is
+# ~4% of balance risked per trade, which breaches a 6% daily loss limit in under
+# two losers. Drop capital_pct to ~6% before running this. See VWAPFADE_MAX_CAPITAL_PCT.
+# CAUTION - hold time: median hold measured at ~6.5 hours. This is not scalping.
+VWAPFADE = {
+    "entry_tf":          "5m",
+    "trend_tf":          "5m",          # unused, kept for market_data compatibility
+    "confirm_tfs":       ["5m"],        # only 5m is needed — no MTF gate
+    "atr_period":        14,
+    "atr_sl_mult":       4.5,           # wide stop — also cuts fee_R proportionally
+    "sl_entry_r":        1.0,           # exit at -1.0R
+    "tp_entry_r":        None,          # NO hard target — trailing is the only exit
+    "trail_trigger_r":   1.5,
+    "trail_gap_r":       0.5,
+    "max_hold_sec":      None,
+    # entry rule
+    "vwap_period":       60,            # bars of 5m VWAP (~5h session anchor)
+    "vwap_dev_pct":      0.008,         # 0.8% stretch from VWAP required
+    "rsi_period":        5,
+    "rsi_long":          30,            # RSI(5) below this for a LONG fade
+    "rsi_short":         70,            # RSI(5) above this for a SHORT fade
+    "min_sl_pct":        0.004,         # skip if sl_dist < 0.4% (fee gate)
+    "entry_candles":     120,
+    "trend_candles":     120,
+}
+
+# Guard rail: the engine caps capital_pct at this when style == "vwapfade",
+# because the 4.5x ATR stop makes each trade risk ~3x what the scalping config
+# does at the same capital_pct.
+VWAPFADE_MAX_CAPITAL_PCT = 6.0
+
+
+def style_cfg(style: str) -> dict:
+    """Single source of truth for style -> params. Was duplicated as
+    `SCALPING if style == "scalping" else SWING` in 8 places, which silently
+    routed any new style to SWING."""
+    return {"scalping": SCALPING, "swing": SWING, "vwapfade": VWAPFADE}.get(style, SCALPING)
+
 
 # ─── Swing Strategy Params ──────────────────────────────────
 SWING = {
@@ -189,6 +251,37 @@ MAX_TRADES_NORMAL = 7
 MAX_LEVERAGE             = 20.0  # hard ceiling — user can never go above this
 DEFAULT_LEVERAGE         = 5.0   # default if user doesn't specify
 MIN_SIGNAL_SCORE         = 4    # minimum layers out of 7
+
+# ─── Adaptive Per-Pair Filter ───────────────────────────────
+# Learns from this bot's OWN closed trades: keeps a rolling window of the last
+# ADAPTIVE_K net-R results per pair and blocks new entries on pairs whose recent
+# mean net-R is negative. Causal by construction — only CLOSED trades feed it.
+#
+# Tuned 2026-07-26 on a 3-window / 50-pair / 17,214-signal candle backtest
+# (20 Jun - 26 Jul). At current taker fees the per-pair bucket cut the loss
+# roughly in half: -0.092 -> -0.045 R/trade, win rate 66.3% -> 67.8%.
+# K=20 beat K=10 (-0.048) and K=40 (-0.050). Feeding it only TAKEN trades beat
+# feeding it every signal, by a wide margin.
+ADAPTIVE_ENABLED         = True
+ADAPTIVE_K               = 20    # rolling window of recent net-R per pair
+ADAPTIVE_MIN_SAMPLES     = 10    # need this many before the filter can block
+# A blocked pair records no new results, so without this it would stay blocked
+# forever. Every PROBE_SECS one trade is let through to re-test the pair.
+#
+# Measured 2026-07-26 (36 days, taker fees) — a probe is by construction a trade
+# on a pair already known to be losing, so short intervals destroy the filter:
+#     permanent block  -0.045 R/trade   (best, but winds down to ~7 trades/day,
+#                                        94% of pairs blocked, 4 zero-trade days)
+#     probe 7d         -0.063           (keeps ~10 trades/day, no silent days)
+#     baseline / off   -0.092
+#     probe 6h         -0.136  WORSE than no filter at all
+# A "shadow" variant (track blocked pairs on paper, unblock when they recover)
+# was also tested and came out at -0.105 — also worse than baseline, because it
+# lets pairs back in on noise. Rejected.
+#
+# 7d is the compromise: still beats baseline, and the bot never goes silent.
+# Set very high (e.g. 10**9) for permanent blocks = best measured R/trade.
+ADAPTIVE_PROBE_SECS      = 7 * 86400
 
 # ─── Bot internals ──────────────────────────────────────────
 SIGNAL_BROADCAST_INTERVAL = 2   # seconds between WS broadcasts

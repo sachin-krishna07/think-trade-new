@@ -8,9 +8,11 @@ from urllib.parse import urlencode
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Any
 
-from config import SCALPING, SWING, POSITION_CHECK_INTERVAL, BINANCE_API_KEY, BINANCE_SECRET_KEY
+from config import (SCALPING, SWING, POSITION_CHECK_INTERVAL, BINANCE_API_KEY,
+                    BINANCE_SECRET_KEY, VWAPFADE_MAX_CAPITAL_PCT, style_cfg)
 from core.signal_engine import SignalResult
 from core.risk_manager import RiskManager
+from core.adaptive_filter import AdaptiveFilter
 import core.supabase_client as db
 
 log = logging.getLogger("trade_engine")
@@ -297,6 +299,11 @@ class TradeEngine:
         self._entry_fail_cooldown: Dict[str, float] = {}
         self._entry_fail_cooldown_secs: int = 5 * 60  # 5 minutes
 
+        # Adaptive per-pair filter — learns from this bot's own closed trades and
+        # stops entering pairs whose recent net-R mean is negative. Warm-started
+        # from the DB in warm_start_adaptive() so a restart doesn't wipe learning.
+        self.adaptive = AdaptiveFilter()
+
         # Per-pair entry lock — prevents double entry during Binance order placement.
         # SL retry can take 1-3s while signal loop fires every 2s, creating a race window
         # where _open dict doesn't have the pair yet → second enter() fires on Binance.
@@ -376,7 +383,7 @@ class TradeEngine:
     async def _enter_inner(self, pair: str, style: str,
                            signal: SignalResult, capital_pct: float,
                            signal_score: int = 4) -> bool:
-        cfg = SCALPING if style == "scalping" else SWING
+        cfg = style_cfg(style)
 
         log.info(f"Attempting entry: {pair} | score={signal.total_score} | dir={signal.signal_direction}")
 
@@ -396,6 +403,14 @@ class TradeEngine:
                 log.info(f"{pair}: blocked by failed-entry cooldown — {int(remaining/60)}m {int(remaining%60)}s remaining")
                 return False
 
+        # Adaptive per-pair filter — skip pairs whose own recent closed trades
+        # have a negative mean net-R. Checked here (not earlier) so the cheap
+        # cooldown checks still short-circuit first.
+        adaptive_ok, adaptive_reason = self.adaptive.allows(pair)
+        if not adaptive_ok:
+            log.info(f"{pair}: blocked by adaptive filter — {adaptive_reason}")
+            return False
+
         wallet = await asyncio.to_thread(db.get_wallet, self.mode)
         if not wallet:
             log.error(f"Wallet not found for mode={self.mode} — run supabase_schema.sql in Supabase SQL Editor!")
@@ -410,6 +425,14 @@ class TradeEngine:
         if entry_price <= 0:
             log.warning(f"Entry blocked — price is 0 for {pair}")
             return False
+
+        # vwapfade uses a 4.5x ATR stop, so risk = position x sl_dist_pct is roughly
+        # 3x the scalping config's at the same capital_pct. Left uncapped, one trade
+        # would risk ~4% of balance and two losers would breach a 6% daily limit.
+        if style == "vwapfade" and capital_pct > VWAPFADE_MAX_CAPITAL_PCT:
+            log.info(f"{pair}: capital_pct {capital_pct}% capped to "
+                     f"{VWAPFADE_MAX_CAPITAL_PCT}% for vwapfade (wide 4.5x ATR stop)")
+            capital_pct = VWAPFADE_MAX_CAPITAL_PCT
 
         sizing = self.risk.calculate_position(
             self._balance, capital_pct,
@@ -429,9 +452,14 @@ class TradeEngine:
         sl_entry_dist = sl_dist * cfg.get("sl_entry_r", 1.0)
 
         # TP is independent of SL (changed 2026-07-14 per user request — was previously
-        # forced 1:1 with sl_entry_dist). No trailing SL (removed 2026-07-10 per user
-        # request).
-        tp_dist = sl_dist * cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
+        # forced 1:1 with sl_entry_dist).
+        # tp_entry_r may be None (vwapfade): no hard target, trailing is the only
+        # profit exit. A far-away placeholder TP is still placed on Binance so the
+        # exchange-side bracket exists, but the monitor's trailing logic will close
+        # long before it — see _monitor_position.
+        tp_r_cfg = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
+        has_hard_tp = tp_r_cfg is not None
+        tp_dist = sl_dist * (tp_r_cfg if has_hard_tp else 20.0)
 
         if direction == "long":
             sl_price = entry_price - sl_entry_dist
@@ -610,13 +638,16 @@ class TradeEngine:
         # sl_entry_dist/tp_dist), so the monitor's trigger always matches what
         # was actually intended for this trade.
         sl_r = cfg.get("sl_entry_r", 1.0)
+        # None = no hard target at all (vwapfade); trailing is the only way out
+        # on the profit side. Every use of tp_r below must be None-guarded.
         tp_r = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
-        be_trigger_r = cfg.get("be_trigger_r")   # None = breakeven lock disabled
-        be_stop_r    = cfg.get("be_stop_r", 0.0)
+        trail_trigger_r = cfg.get("trail_trigger_r")   # None = trailing disabled
+        trail_gap_r     = cfg.get("trail_gap_r", 0.0)
 
         highest_pnl = 0.0
-        highest_r    = 0.0     # peak R reached — arms the breakeven stop move
-        be_armed     = False   # True once highest_r >= be_trigger_r
+        highest_r    = 0.0     # peak R reached — drives the trailing stop
+        trail_armed  = False   # True once highest_r >= trail_trigger_r
+        trail_stop_r = None    # current trailing stop level, once armed
         _last_db_write = 0.0  # ts of last DB position write — time-based throttle below
 
         _consecutive_errors = 0  # track back-to-back errors to detect hard failures
@@ -641,13 +672,24 @@ class TradeEngine:
                 highest_pnl = max(highest_pnl, pnl)
                 r_current = pnl / risk_amount if risk_amount > 0 else 0
 
-                # Breakeven lock: once peak R reaches be_trigger_r, raise the stop to
-                # be_stop_r (+0.2R) so this trade can no longer close for a loss.
+                # Continuous trailing stop: once peak R reaches trail_trigger_r, arm
+                # the trailing stop at (peak_r - trail_gap_r). Every subsequent tick
+                # that raises peak_r re-tightens the stop upward — it never loosens.
                 if r_current > highest_r:
                     highest_r = r_current
-                if be_trigger_r is not None and not be_armed and highest_r >= be_trigger_r:
-                    be_armed = True
-                    log.info(f"{pair}: breakeven armed at +{highest_r:.2f}R — stop -> +{be_stop_r:.2f}R")
+                if trail_trigger_r is not None and highest_r >= trail_trigger_r:
+                    if not trail_armed:
+                        trail_armed = True
+                        log.info(f"{pair}: trailing armed at +{highest_r:.2f}R")
+                    trail_stop_r = highest_r - trail_gap_r
+
+                # Convert the R-based trailing stop back to an actual price for
+                # display/DB — inverse of r = pnl/risk_amount, pnl = pnl_pct*pos_size_usd.
+                display_sl = sl_price
+                if trail_armed and trail_stop_r is not None:
+                    stop_pnl_pct = trail_stop_r * risk_amount / pos_size_usd
+                    display_sl = (entry_price * (1 + stop_pnl_pct) if direction == "long"
+                                  else entry_price * (1 - stop_pnl_pct))
 
                 # Update position in DB every ~5s. Time-based so it's independent of
                 # POSITION_CHECK_INTERVAL — the old int(elapsed*2)%10 hack assumed 0.5s
@@ -661,7 +703,7 @@ class TradeEngine:
                             position_id, current_price,
                             round(pnl, 4), round(pnl_pct * 100, 4),
                             round(highest_pnl, 4),
-                            sl_price=round(sl_price, 6),
+                            sl_price=round(display_sl, 6),
                         )
                     except Exception as e:
                         log.warning(f"{pair} DB update failed (non-fatal): {e}")
@@ -669,19 +711,25 @@ class TradeEngine:
                 await self.on_update({
                     "type": "position_update",
                     "data": {
-                        "pair":          pair,
-                        "direction":     direction,
-                        "entry":         entry_price,
-                        "current":       current_price,
-                        "sl":            sl_price,
-                        "tp":            tp_price,
-                        "pnl":           round(pnl, 4),
-                        "pnl_pct":       round(pnl_pct * 100, 4),
-                        "r":             round(r_current, 3),
-                        "highest_pnl":   round(highest_pnl, 4),
-                        "elapsed_sec":   int(elapsed),
-                        "size_usd":      round(pos_size_usd, 2),
-                        "risk_usd":      round(risk_amount, 2),
+                        "pair":            pair,
+                        "direction":       direction,
+                        "entry":           entry_price,
+                        "current":         current_price,
+                        "sl":              round(display_sl, 6),
+                        "tp":              tp_price,
+                        # False for vwapfade: tp_price is a far-away placeholder
+                        # bracket, not a real target — the UI must not show it.
+                        "has_hard_tp":     tp_r is not None,
+                        "pnl":             round(pnl, 4),
+                        "pnl_pct":         round(pnl_pct * 100, 4),
+                        "r":               round(r_current, 3),
+                        "highest_pnl":     round(highest_pnl, 4),
+                        "trailing_armed":  trail_armed,
+                        "profit_locked":   trail_armed,
+                        "trailing_sl":     round(display_sl, 6) if trail_armed else None,
+                        "elapsed_sec":     int(elapsed),
+                        "size_usd":        round(pos_size_usd, 2),
+                        "risk_usd":        round(risk_amount, 2),
                     }
                 })
 
@@ -694,12 +742,13 @@ class TradeEngine:
                 # PENGU, SKL all missed their exit because the rounded sl_price/
                 # tp_price landed at the wrong tick for sub-cent tokens).
                 exit_reason = None
-                if r_current >= tp_r:
-                    exit_reason = "tp"
-                elif be_armed and r_current <= be_stop_r:
-                    # breakeven lock hit — trade reached be_trigger_r then pulled back
-                    exit_reason = "breakeven"
-                elif not be_armed and r_current <= -sl_r:
+                if tp_r is not None and r_current >= tp_r:
+                    exit_reason = "tp"   # hard-cap exit
+                elif trail_armed and r_current <= trail_stop_r:
+                    # trailing stop hit — peaked above trail_trigger_r, then pulled
+                    # back to the current locked level (peak_r - trail_gap_r)
+                    exit_reason = "trailing"
+                elif not trail_armed and r_current <= -sl_r:
                     exit_reason = "sl"
 
                 if exit_reason:
@@ -792,6 +841,12 @@ class TradeEngine:
 
         self.risk.record_trade_result(pnl, self.mode)
 
+        # Feed the adaptive filter. Uses NET R (after both fees) — fees run ~0.16R
+        # per trade here, so gross r_multiple would make every pair look better
+        # than it is. Recorded only now, at close, which keeps the filter causal.
+        net_r = net_pnl / risk_amount if risk_amount > 0 else None
+        self.adaptive.record(pair, net_r)
+
         log.info(f"TRADE CLOSED: {pair} | {reason.upper()} | PnL=${pnl:.2f} ({pnl_pct*100:.2f}%) | R={r_multiple:.2f}")
 
         await self.on_update({
@@ -833,7 +888,6 @@ class TradeEngine:
             if not open_positions:
                 return
             log.info(f"Recovering {len(open_positions)} open position(s) from previous session...")
-            cfg_map = {"scalping": SCALPING, "swing": SWING}
             for p in open_positions:
                 pair = p["pair"]
                 # Skip if already in _open (shouldn't happen on fresh start)
@@ -857,7 +911,7 @@ class TradeEngine:
                 trade_id    = p["trade_id"]
                 position_id = p["position_id"]
                 style       = p.get("style", "scalping")
-                cfg         = cfg_map.get(style, SCALPING)
+                cfg         = style_cfg(style)
                 monitor_task = asyncio.create_task(
                     self._monitor_position(pair, style, cfg, trade_id, position_id, pos_snapshot)
                 )
@@ -1106,6 +1160,26 @@ class TradeEngine:
         except Exception as e:
             log.error(f"_reconcile_binance_positions failed: {e}", exc_info=True)
 
+    async def warm_start_adaptive(self) -> int:
+        """Rebuild the adaptive filter from this bot's closed trades in the DB.
+
+        Called once at startup — without it every restart would begin with an
+        empty window and trade blocked pairs again until it relearned them.
+        """
+        if not self.adaptive.enabled:
+            return 0
+        try:
+            rows = await asyncio.to_thread(
+                db.get_closed_for_adaptive, self.mode, self.trader_name, 600
+            )
+            return self.adaptive.warm_start(rows)
+        except Exception as e:
+            log.warning(f"Adaptive warm-start failed (non-fatal, starts empty): {e}")
+            return 0
+
+    def adaptive_snapshot(self) -> Dict:
+        return self.adaptive.snapshot()
+
     def set_price_getter(self, fn):
         self._get_price = fn
 
@@ -1148,6 +1222,7 @@ class TradeEngine:
                 tp_price     = pos.get("tp_price", 0)
                 pos_size_usd = pos.get("position_size_usd", 0)
                 risk_amount  = pos.get("risk_amount", 1)
+                style        = pos.get("style", "scalping")
 
                 if direction == "long":
                     pnl_pct = (current - entry_price) / entry_price
@@ -1157,27 +1232,43 @@ class TradeEngine:
                 pnl       = pnl_pct * pos_size_usd
                 r_current = pnl / risk_amount if risk_amount > 0 else 0
 
+                # Reconnect snapshot has no memory of this position's historical peak
+                # R (that lives in _monitor_position's closure) — best-effort using
+                # r_current as the peak; the next live tick from the running monitor
+                # corrects this immediately.
+                cfg = style_cfg(style)
+                trail_trigger_r = cfg.get("trail_trigger_r")
+                trail_gap_r     = cfg.get("trail_gap_r", 0.0)
+                trail_armed = trail_trigger_r is not None and r_current >= trail_trigger_r
+                display_sl = sl_price
+                if trail_armed:
+                    trail_stop_r = r_current - trail_gap_r
+                    stop_pnl_pct = trail_stop_r * risk_amount / pos_size_usd if pos_size_usd else 0
+                    display_sl = (entry_price * (1 + stop_pnl_pct) if direction == "long"
+                                  else entry_price * (1 - stop_pnl_pct))
+
                 # Calculate actual elapsed time from stored entry_time
                 entry_time  = pos.get("_entry_time")
                 elapsed_sec = int((datetime.now(timezone.utc) - entry_time).total_seconds()) \
                               if entry_time else 0
 
                 result.append({
-                    "pair":          pair,
-                    "direction":     direction,
-                    "entry":         entry_price,
-                    "current":       current,
-                    "sl":            sl_price,
-                    "tp":            tp_price,
-                    "pnl":           round(pnl, 4),
-                    "pnl_pct":       round(pnl_pct * 100, 4),
-                    "r":             round(r_current, 3),
-                    "highest_pnl":   0,
-                    "breakeven_hit": False,
-                    "profit_locked": False,
-                    "trailing_sl":   sl_price,
-                    "elapsed_sec":   elapsed_sec,
-                    "size_usd":      round(pos_size_usd, 2),
-                    "risk_usd":      round(risk_amount, 2),
+                    "pair":            pair,
+                    "direction":       direction,
+                    "entry":           entry_price,
+                    "current":         current,
+                    "sl":              round(display_sl, 6),
+                    "tp":              tp_price,
+                    "has_hard_tp":     cfg.get("tp_entry_r", 1.0) is not None,
+                    "pnl":             round(pnl, 4),
+                    "pnl_pct":         round(pnl_pct * 100, 4),
+                    "r":               round(r_current, 3),
+                    "highest_pnl":     0,
+                    "trailing_armed":  trail_armed,
+                    "profit_locked":   trail_armed,
+                    "trailing_sl":     round(display_sl, 6) if trail_armed else None,
+                    "elapsed_sec":     elapsed_sec,
+                    "size_usd":        round(pos_size_usd, 2),
+                    "risk_usd":        round(risk_amount, 2),
                 })
         return result

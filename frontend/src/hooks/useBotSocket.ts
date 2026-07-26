@@ -47,9 +47,11 @@ export interface PositionData {
   pnl_pct: number;
   r: number;
   highest_pnl: number;
-  breakeven_hit: boolean;
+  trailing_armed: boolean;
+  /** false for vwapfade — `tp` is a placeholder bracket, not a real target */
+  has_hard_tp?: boolean;
   profit_locked: boolean;
-  trailing_sl: number;
+  trailing_sl: number | null;
   elapsed_sec: number;
   size_usd: number;
   risk_usd: number;
