@@ -38,6 +38,35 @@ class BotController:
     async def start(self, mode: str, style: str, pairs: List[str],
                     capital_pct: float, broadcast_cb: Callable, leverage: float = 5.0,
                     trader_name: str = "Unknown", reverse_direction: bool = False):
+        # main.py fires this via asyncio.create_task() and returns immediately —
+        # an unhandled exception here is swallowed by asyncio (only visible as
+        # "Task exception was never retrieved" in the process's own stderr/
+        # journalctl, never in the app's log broadcast). That made a real start()
+        # crash look identical to "nothing happened" in the frontend Logs panel.
+        # Wrap the whole body so any failure is logged, broadcast, and _running
+        # is reset — otherwise a crash mid-start also leaves the bot stuck
+        # "running" with no way to retry without a server restart.
+        try:
+            await self._start_inner(mode, style, pairs, capital_pct, broadcast_cb,
+                                    leverage, trader_name, reverse_direction)
+        except Exception as e:
+            log.error(f"Bot start failed: {e}", exc_info=True)
+            self._running = False
+            # Use the broadcast_cb PARAMETER, not self._broadcast_cb/self._broadcast() —
+            # a crash early in _start_inner (before it assigns self._broadcast_cb) would
+            # otherwise leave this silent, the exact failure mode this fix exists for.
+            try:
+                await broadcast_cb({
+                    "type": "bot_status",
+                    "data": {"running": False, "mode": mode, "style": style,
+                            "pairs": pairs, "error": str(e)}
+                })
+            except Exception as be:
+                log.debug(f"Broadcast of start-failure error failed: {be}")
+
+    async def _start_inner(self, mode: str, style: str, pairs: List[str],
+                           capital_pct: float, broadcast_cb: Callable, leverage: float = 5.0,
+                           trader_name: str = "Unknown", reverse_direction: bool = False):
         if self._running:
             log.warning("Bot already running")
             return

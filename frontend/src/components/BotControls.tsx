@@ -373,7 +373,7 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
           </div>
         )}
         <p className="text-[11px] text-gray-600">
-          SL: ATR×1.35×0.75 · Max loss: -1.5R · Trailing from 1.1R (locks +0.85R)
+          {styleMeta(running ? curStyle : style).exitSummary}
         </p>
       </div>
 

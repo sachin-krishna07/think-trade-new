@@ -18,6 +18,8 @@ export interface StyleMeta {
   maxCapitalPct?: number;
   /** shown when the style needs a heads-up before starting */
   caution?: string;
+  /** one-line exit-rule summary — must mirror this style's block in config.py */
+  exitSummary: string;
 }
 
 export const STYLES: Record<StyleId, StyleMeta> = {
@@ -26,12 +28,18 @@ export const STYLES: Record<StyleId, StyleMeta> = {
     label: "Scalping",
     blurb: "2–8 min holds · 15m trend · 5m entry · 7-layer signal",
     scored: true,
+    // config.py SCALPING: atr_sl_mult 1.35, sl_entry_r 1.0, tp_entry_r 2.5,
+    // trail_trigger_r 1.1, trail_gap_r 0.4
+    exitSummary: "SL: ATR×1.35×1.0R · Hard cap +2.5R · Trailing arms at +1.1R (0.4R gap)",
   },
   swing: {
     id: "swing",
     label: "Swing",
     blurb: "Hours–days · 4h trend · 1h entry · 7-layer signal",
     scored: true,
+    // config.py SWING has no sl_entry_r/tp_entry_r/trailing keys — the engine's
+    // cfg.get(..., 1.0) fallback makes this a plain ATR×3.0 stop/target, no trail.
+    exitSummary: "SL: ATR×3.0×1.0R · Fixed TP +1.0R · No trailing",
   },
   vwapfade: {
     id: "vwapfade",
@@ -42,6 +50,9 @@ export const STYLES: Record<StyleId, StyleMeta> = {
     maxCapitalPct: 6,
     caution:
       "~6.5h median hold (not scalping). Wide 4.5×ATR stop — backend caps capital at 6% per trade.",
+    // config.py VWAPFADE: atr_sl_mult 4.5, sl_entry_r 1.0, tp_entry_r None,
+    // trail_trigger_r 1.5, trail_gap_r 0.5
+    exitSummary: "SL: ATR×4.5×1.0R · No hard cap · Trailing arms at +1.5R (0.5R gap)",
   },
 };
 
