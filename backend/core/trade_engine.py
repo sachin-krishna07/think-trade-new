@@ -423,7 +423,15 @@ class TradeEngine:
 
         entry_price = signal.current_price
         if entry_price <= 0:
-            log.warning(f"Entry blocked — price is 0 for {pair}")
+            # A pair can have enough REST-fetched candles for is_ready()/the signal
+            # to fire while its live WS stream has never delivered a tick, leaving
+            # last_price at 0. Without a cooldown this retries every scan cycle
+            # forever (~2s), spamming logs and the DB — observed on MMT with the
+            # signal re-firing indefinitely. Cool it down like any other failed entry.
+            self._entry_fail_cooldown[pair] = time.time()
+            log.warning(f"Entry blocked — no live price for {pair} yet "
+                        f"(WS tick not received); pausing entries "
+                        f"{self._entry_fail_cooldown_secs // 60}m")
             return False
 
         # vwapfade uses a 4.5x ATR stop, so risk = position x sl_dist_pct is roughly

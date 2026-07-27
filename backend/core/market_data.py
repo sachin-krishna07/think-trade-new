@@ -145,6 +145,15 @@ class MarketDataManager:
                             "volume": float(row[5]),
                         }
                         self.candles[pair][tf].append(candle)
+                    # Seed last_price from REST. Without this it stays 0 until the
+                    # first WS tick, but the WS kline/aggTrade streams only push on
+                    # trade activity — thin pairs (MMT, CHIP, GRAM observed sending
+                    # nothing for 15s+) can stay at 0 indefinitely while having
+                    # enough REST candles for is_ready() and the signal to fire.
+                    # The entry then aborts on "price is 0" every scan cycle.
+                    # Only seed if unset, so a live WS tick always wins.
+                    if data and not self.last_price.get(pair):
+                        self.last_price[pair] = float(data[-1][4])
                     log.info(f"Fetched {len(data)} {tf} candles for {pair}")
         except Exception as e:
             log.error(f"Failed to fetch {tf} klines for {pair}: {e}")
