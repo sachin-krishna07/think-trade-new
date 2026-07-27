@@ -16,7 +16,7 @@ CREATE TABLE bot_config (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   is_running    BOOLEAN DEFAULT FALSE,
   mode          TEXT DEFAULT 'demo' CHECK (mode IN ('demo', 'live')),
-  style         TEXT DEFAULT 'scalping' CHECK (style IN ('scalping', 'swing')),
+  style         TEXT DEFAULT 'scalping' CHECK (style IN ('scalping', 'swing', 'vwapfade')),
   capital_pct   DECIMAL(5,2) DEFAULT 1.0,
   selected_pairs TEXT[] DEFAULT ARRAY['BTC','ETH','SOL','BNB','XRP'],
   updated_at    TIMESTAMPTZ DEFAULT NOW()
