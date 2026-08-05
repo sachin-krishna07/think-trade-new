@@ -124,9 +124,9 @@ BINANCE_REST_BASE = "https://api.binance.com/api/v3"
 SCALPING = {
     "trend_tf":          "15m",           # primary trend TF (legacy, used as fallback)
     "entry_tf":          "5m",            # entry signal TF
-    "confirm_tfs":       ["30m", "15m", "5m"],  # multi-TF trend check (high→low)
+    "confirm_tfs":       ["1h", "30m", "15m", "5m"],  # multi-TF trend check (high→low)
     "bias_tf":           "1h",            # higher TF bias gate — must agree with signal
-    "mtf_min_align":     2,               # min TFs that must agree (out of 3)
+    "mtf_min_align":     4,               # ALL 4 TFs (1h/30m/15m/5m) must agree — no majority, full alignment required
     "atr_period":        14,
     "atr_sl_mult":       1.35,
     "sl_entry_r":        1.0,   # changed 2026-07-26 from 2.5 → 1.0 per user request.
@@ -157,65 +157,11 @@ SCALPING = {
     "entry_candles":     100,
 }
 
-# ─── VWAP Fade (mean reversion) ─────────────────────────────
-# Added 2026-07-27. This is NOT the 7-layer signal — it is a standalone
-# mean-reversion rule that fades stretched moves back toward VWAP:
-#     LONG  when price <= vwap_dev_pct BELOW session VWAP and RSI(5) < rsi_long
-#     SHORT when price >= vwap_dev_pct ABOVE session VWAP and RSI(5) > rsi_short
-# No trend/ADX/multi-TF gating — it deliberately trades AGAINST the move.
-#
-# Chosen after a 50-pair / 4-window candle backtest (8 Jun - 26 Jul, ~232k
-# trigger bars) that compared 6 strategy families against a random control:
-#     vwapfade  +0.022 median R/trade, 77% of its configs positive, 4/4 windows
-#     meanrev   +0.014, 65% positive
-#     trend_pb  -0.116, 0% positive   <- the 7-layer signal's family
-#     RANDOM    -0.079, 0% positive
-# Best config pooled +0.046 R/trade at CURRENT taker fees (+0.066 with maker
-# entry), 33/50 pairs net-positive, top pair only 9% of net.
-#
-# Re-validated on 1-MINUTE exit paths (5m bars are optimistic when stop and
-# target sit close together). On its WEAKEST window the 1m path moved it
-# +0.082: taker -0.089 -> -0.007, maker -0.064 -> +0.018. The wide trailing
-# stop is why finer bars help here rather than hurt.
-#
-# CAUTION - sizing: atr_sl_mult 4.5 puts sl_dist_pct around 2%, and
-# risk = position_size x sl_dist_pct. At capital_pct 20% x 10x leverage that is
-# ~4% of balance risked per trade, which breaches a 6% daily loss limit in under
-# two losers. Drop capital_pct to ~6% before running this. See VWAPFADE_MAX_CAPITAL_PCT.
-# CAUTION - hold time: median hold measured at ~6.5 hours. This is not scalping.
-VWAPFADE = {
-    "entry_tf":          "5m",
-    "trend_tf":          "5m",          # unused, kept for market_data compatibility
-    "confirm_tfs":       ["5m"],        # only 5m is needed — no MTF gate
-    "atr_period":        14,
-    "atr_sl_mult":       4.5,           # wide stop — also cuts fee_R proportionally
-    "sl_entry_r":        1.0,           # exit at -1.0R
-    "tp_entry_r":        None,          # NO hard target — trailing is the only exit
-    "trail_trigger_r":   1.5,
-    "trail_gap_r":       0.5,
-    "max_hold_sec":      None,
-    # entry rule
-    "vwap_period":       60,            # bars of 5m VWAP (~5h session anchor)
-    "vwap_dev_pct":      0.008,         # 0.8% stretch from VWAP required
-    "rsi_period":        5,
-    "rsi_long":          30,            # RSI(5) below this for a LONG fade
-    "rsi_short":         70,            # RSI(5) above this for a SHORT fade
-    "min_sl_pct":        0.004,         # skip if sl_dist < 0.4% (fee gate)
-    "entry_candles":     120,
-    "trend_candles":     120,
-}
-
-# Guard rail: the engine caps capital_pct at this when style == "vwapfade",
-# because the 4.5x ATR stop makes each trade risk ~3x what the scalping config
-# does at the same capital_pct.
-VWAPFADE_MAX_CAPITAL_PCT = 6.0
-
-
 def style_cfg(style: str) -> dict:
     """Single source of truth for style -> params. Was duplicated as
     `SCALPING if style == "scalping" else SWING` in 8 places, which silently
     routed any new style to SWING."""
-    return {"scalping": SCALPING, "swing": SWING, "vwapfade": VWAPFADE}.get(style, SCALPING)
+    return {"scalping": SCALPING, "swing": SWING}.get(style, SCALPING)
 
 
 # ─── Swing Strategy Params ──────────────────────────────────

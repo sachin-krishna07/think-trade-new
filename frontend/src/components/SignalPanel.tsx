@@ -6,7 +6,6 @@ interface Props {
   selectedPairs?: string[];
   running?: boolean;
   knownPairs?: string[];
-  /** vwapfade is a standalone rule — the 7-layer grid does not apply to it */
   style?: string;
 }
 
@@ -38,133 +37,7 @@ function getDetail(sig: SignalData, key: string): string {
   }
 }
 
-/**
- * VWAP-fade card. The 7-layer grid is meaningless for this style — it is a
- * two-condition rule (VWAP stretch + RSI extreme), so the card shows how close
- * each condition is to firing instead of a score out of 7.
- * Thresholds mirror backend/config.py VWAPFADE.
- */
-const VF_DEV = 0.8;    // vwap_dev_pct, percent
-const VF_RSI_LONG = 30;
-const VF_RSI_SHORT = 70;
-
-function VwapFadeCard({ pair, sig }: { pair: string; sig: SignalData }) {
-  const dir = sig.signal_direction || "none";
-  const canTrade = sig.trade_signal;
-  const dev = sig.vwap_dev_pct ?? 0;      // percent, signed
-  const rsiV = sig.rsi2_value ?? 50;
-  const isLong = dir === "long";
-  const isShort = dir === "short";
-
-  // Which side is price stretched toward, and how far along to the trigger
-  const devPct = Math.min(100, (Math.abs(dev) / VF_DEV) * 100);
-  const devReady = Math.abs(dev) >= VF_DEV;
-  // RSI progress toward whichever extreme matches the stretch direction
-  const wantLong = dev < 0;
-  const rsiReady = wantLong ? rsiV < VF_RSI_LONG : rsiV > VF_RSI_SHORT;
-  const rsiPct = wantLong
-    ? Math.min(100, ((100 - rsiV) / (100 - VF_RSI_LONG)) * 100)
-    : Math.min(100, (rsiV / VF_RSI_SHORT) * 100);
-
-  const border = canTrade
-    ? "border-green-500/60 shadow-[0_0_20px_rgba(34,197,94,0.2)]"
-    : devReady || rsiReady ? "border-amber-500/25" : "border-[#1e2433]";
-
-  const dirBg = isLong ? "bg-green-500/15 text-green-400 border-green-500/30"
-              : isShort ? "bg-red-500/15 text-red-400 border-red-500/30"
-              : "bg-gray-700/20 text-gray-500 border-gray-700/30";
-
-  const Cond = ({ label, val, ready, pct, hint }: {
-    label: string; val: string; ready: boolean; pct: number; hint: string;
-  }) => (
-    <div className={`rounded-lg px-2 py-1.5 ${ready
-      ? "bg-green-500/10 border border-green-500/30"
-      : "bg-[#111827] border border-[#1e2433]"}`}>
-      <div className="flex items-center justify-between">
-        <span className={`text-[9px] font-black ${ready ? "text-green-400" : "text-gray-600"}`}>
-          {label}
-        </span>
-        <span className={`text-[10px] font-mono font-bold ${ready ? "text-green-300" : "text-gray-400"}`}>
-          {val}
-        </span>
-      </div>
-      <div className="h-0.5 bg-[#1e2433] rounded-full mt-1 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${ready ? "bg-green-400" : "bg-gray-600"}`}
-             style={{ width: `${pct}%` }} />
-      </div>
-      <div className="text-[8px] text-gray-700 mt-0.5">{hint}</div>
-    </div>
-  );
-
-  return (
-    <div className={`bg-[#0a0d14] border rounded-2xl overflow-hidden transition-all duration-200 ${border}`}>
-      <div className={`h-0.5 w-full ${canTrade
-        ? "bg-gradient-to-r from-green-500 to-emerald-400"
-        : "bg-transparent"}`} />
-      <div className="p-3">
-        <div className="flex items-center justify-between mb-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-white font-black text-sm tracking-wide">{pair}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${dirBg}`}>
-              {dir === "none" ? "WAITING" : dir.toUpperCase()}
-            </span>
-          </div>
-          <span className="text-white font-mono font-bold text-xs">
-            ${fmt(sig.price, sig.price > 100 ? 2 : 4)}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5 mb-2">
-          <Cond
-            label="VWAP STRETCH"
-            val={`${dev >= 0 ? "+" : ""}${fmt(dev, 2)}%`}
-            ready={devReady}
-            pct={devPct}
-            hint={`needs ±${VF_DEV}%`}
-          />
-          <Cond
-            label="RSI(5)"
-            val={fmt(rsiV, 1)}
-            ready={rsiReady}
-            pct={rsiPct}
-            hint={wantLong ? `needs <${VF_RSI_LONG}` : `needs >${VF_RSI_SHORT}`}
-          />
-        </div>
-
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[9px] text-gray-600">
-            ATR <span className="text-gray-400 font-mono">
-              {fmt(sig.atr_value, sig.atr_value > 10 ? 1 : 4)}
-            </span>
-          </span>
-          <span className="text-[9px] text-gray-600">
-            fades {dev < 0 ? "dip → LONG" : "pop → SHORT"}
-          </span>
-        </div>
-
-        {canTrade ? (
-          <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl
-                          bg-green-500/15 border border-green-500/40 text-green-400 text-[11px] font-black tracking-wide">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            ENTRY · FADE {dir.toUpperCase()}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl
-                          bg-[#111827] border border-[#1e2433] text-gray-600 text-[10px] font-semibold">
-            {devReady && !rsiReady ? "stretched — waiting RSI"
-              : !devReady && rsiReady ? "RSI extreme — waiting stretch"
-              : "no setup"}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PairSignalCard({ pair, sig, style }: { pair: string; sig?: SignalData; style?: string }) {
-  if (sig && style === "vwapfade") {
-    return <VwapFadeCard pair={pair} sig={sig} />;
-  }
+function PairSignalCard({ pair, sig }: { pair: string; sig?: SignalData; style?: string }) {
   if (!sig) {
     return (
       <div className="bg-[#0a0d14] border border-[#1e2433] rounded-2xl p-4 animate-pulse">
@@ -326,14 +199,9 @@ function PairSignalCard({ pair, sig, style }: { pair: string; sig?: SignalData; 
 
 export default function SignalPanel({ signals, selectedPairs, running, knownPairs, style }: Props) {
   const basePairs = selectedPairs?.length ? selectedPairs : Object.keys(signals);
-  const isFade = style === "vwapfade";
-  // Scored styles: highest score first, so cards climb as their score rises.
-  // vwapfade has no score — rank by how stretched price is from VWAP instead,
-  // which is the thing that actually predicts an imminent entry.
+  // Highest score first, so cards climb as their score rises.
   const signalPairs = [...basePairs].sort((a, b) =>
-    isFade
-      ? Math.abs(signals[b]?.vwap_dev_pct ?? 0) - Math.abs(signals[a]?.vwap_dev_pct ?? 0)
-      : (signals[b]?.total_score ?? -1) - (signals[a]?.total_score ?? -1)
+    (signals[b]?.total_score ?? -1) - (signals[a]?.total_score ?? -1)
   );
 
   if (running && signalPairs.length === 0) {

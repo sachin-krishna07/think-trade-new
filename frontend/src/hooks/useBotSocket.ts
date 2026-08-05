@@ -48,7 +48,7 @@ export interface PositionData {
   r: number;
   highest_pnl: number;
   trailing_armed: boolean;
-  /** false for vwapfade — `tp` is a placeholder bracket, not a real target */
+  /** false when there's no hard target — `tp` is a placeholder bracket */
   has_hard_tp?: boolean;
   profit_locked: boolean;
   trailing_sl: number | null;

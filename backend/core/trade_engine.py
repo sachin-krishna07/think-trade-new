@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Any
 
 from config import (SCALPING, SWING, POSITION_CHECK_INTERVAL, BINANCE_API_KEY,
-                    BINANCE_SECRET_KEY, VWAPFADE_MAX_CAPITAL_PCT, style_cfg)
+                    BINANCE_SECRET_KEY, style_cfg)
 from core.signal_engine import SignalResult
 from core.risk_manager import RiskManager
 from core.adaptive_filter import AdaptiveFilter
@@ -434,14 +434,6 @@ class TradeEngine:
                         f"{self._entry_fail_cooldown_secs // 60}m")
             return False
 
-        # vwapfade uses a 4.5x ATR stop, so risk = position x sl_dist_pct is roughly
-        # 3x the scalping config's at the same capital_pct. Left uncapped, one trade
-        # would risk ~4% of balance and two losers would breach a 6% daily limit.
-        if style == "vwapfade" and capital_pct > VWAPFADE_MAX_CAPITAL_PCT:
-            log.info(f"{pair}: capital_pct {capital_pct}% capped to "
-                     f"{VWAPFADE_MAX_CAPITAL_PCT}% for vwapfade (wide 4.5x ATR stop)")
-            capital_pct = VWAPFADE_MAX_CAPITAL_PCT
-
         sizing = self.risk.calculate_position(
             self._balance, capital_pct,
             entry_price, signal.atr_value, cfg["atr_sl_mult"],
@@ -461,8 +453,8 @@ class TradeEngine:
 
         # TP is independent of SL (changed 2026-07-14 per user request — was previously
         # forced 1:1 with sl_entry_dist).
-        # tp_entry_r may be None (vwapfade): no hard target, trailing is the only
-        # profit exit. A far-away placeholder TP is still placed on Binance so the
+        # tp_entry_r may be None: no hard target, trailing is the only profit
+        # exit. A far-away placeholder TP is still placed on Binance so the
         # exchange-side bracket exists, but the monitor's trailing logic will close
         # long before it — see _monitor_position.
         tp_r_cfg = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
@@ -646,7 +638,7 @@ class TradeEngine:
         # sl_entry_dist/tp_dist), so the monitor's trigger always matches what
         # was actually intended for this trade.
         sl_r = cfg.get("sl_entry_r", 1.0)
-        # None = no hard target at all (vwapfade); trailing is the only way out
+        # None = no hard target at all; trailing is the only way out
         # on the profit side. Every use of tp_r below must be None-guarded.
         tp_r = cfg.get("tp_entry_r", cfg.get("sl_entry_r", 1.0))
         trail_trigger_r = cfg.get("trail_trigger_r")   # None = trailing disabled
@@ -725,7 +717,7 @@ class TradeEngine:
                         "current":         current_price,
                         "sl":              round(display_sl, 6),
                         "tp":              tp_price,
-                        # False for vwapfade: tp_price is a far-away placeholder
+                        # False when tp_r is None: tp_price is a far-away placeholder
                         # bracket, not a real target — the UI must not show it.
                         "has_hard_tp":     tp_r is not None,
                         "pnl":             round(pnl, 4),

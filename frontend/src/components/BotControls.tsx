@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio, Repeat, Waves } from "lucide-react";
+import { Play, Square, AlertTriangle, Zap, TrendingUp, Monitor, Radio, Repeat } from "lucide-react";
 import { useExchangeRate } from "@/hooks/useExchangeRate";
 import { STYLE_IDS, styleMeta } from "@/lib/styles";
 import {
@@ -194,9 +194,7 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
           <div className="flex-1 bg-[#111827] border border-[#1e2433] rounded-lg px-3 py-2 text-center">
             <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Style</div>
             <div className="flex items-center justify-center gap-1 text-xs font-bold text-indigo-300">
-              {curStyle === "scalping" ? <Zap size={11} />
-                : curStyle === "swing" ? <TrendingUp size={11} />
-                : <Waves size={11} />}
+              {curStyle === "scalping" ? <Zap size={11} /> : <TrendingUp size={11} />}
               {styleMeta(curStyle).label}
             </div>
           </div>
@@ -255,9 +253,7 @@ export default function BotControls({ running, mode: curMode, style: curStyle,
                       : "bg-[#111827] border border-[#1e2433] text-gray-600 hover:text-gray-300 hover:border-[#2a3045]"
                   }`}>
                   <span className="flex items-center justify-center gap-1.5">
-                    {s === "scalping" ? <Zap size={11} />
-                      : s === "swing" ? <TrendingUp size={11} />
-                      : <Waves size={11} />}
+                    {s === "scalping" ? <Zap size={11} /> : <TrendingUp size={11} />}
                     {styleMeta(s).label}
                   </span>
                 </button>

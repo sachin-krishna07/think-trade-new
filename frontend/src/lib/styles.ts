@@ -1,18 +1,14 @@
 /**
  * Trading-style metadata — single source of truth for the UI.
  *
- * Must stay in sync with backend/config.py (SCALPING / SWING / VWAPFADE and
- * style_cfg()). The backend caps capital_pct for vwapfade at
- * VWAPFADE_MAX_CAPITAL_PCT, so `maxCapitalPct` here mirrors that; the UI warns
- * rather than silently letting the user set a value the backend will override.
+ * Must stay in sync with backend/config.py (SCALPING / SWING and style_cfg()).
  */
-export type StyleId = "scalping" | "swing" | "vwapfade";
+export type StyleId = "scalping" | "swing";
 
 export interface StyleMeta {
   id: StyleId;
   label: string;
   blurb: string;
-  /** vwapfade is a standalone rule, not the 7-layer scored signal */
   scored: boolean;
   /** backend clamps capital_pct to this when set */
   maxCapitalPct?: number;
@@ -41,22 +37,9 @@ export const STYLES: Record<StyleId, StyleMeta> = {
     // cfg.get(..., 1.0) fallback makes this a plain ATR×3.0 stop/target, no trail.
     exitSummary: "SL: ATR×3.0×1.0R · Fixed TP +1.0R · No trailing",
   },
-  vwapfade: {
-    id: "vwapfade",
-    label: "VWAP Fade",
-    blurb:
-      "Mean reversion · fades 0.8% VWAP stretch + RSI(5) extreme · trades AGAINST the move",
-    scored: false,
-    maxCapitalPct: 6,
-    caution:
-      "~6.5h median hold (not scalping). Wide 4.5×ATR stop — backend caps capital at 6% per trade.",
-    // config.py VWAPFADE: atr_sl_mult 4.5, sl_entry_r 1.0, tp_entry_r None,
-    // trail_trigger_r 1.5, trail_gap_r 0.5
-    exitSummary: "SL: ATR×4.5×1.0R · No hard cap · Trailing arms at +1.5R (0.5R gap)",
-  },
 };
 
-export const STYLE_IDS: StyleId[] = ["scalping", "swing", "vwapfade"];
+export const STYLE_IDS: StyleId[] = ["scalping", "swing"];
 
 export function styleMeta(id: string): StyleMeta {
   return STYLES[id as StyleId] ?? STYLES.scalping;

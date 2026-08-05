@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from config import SCALPING, SWING, MIN_SIGNAL_SCORE, VWAPFADE, style_cfg
+from config import SCALPING, SWING, MIN_SIGNAL_SCORE, style_cfg
 from core.indicators import (
     ema, adx, rsi, atr, vwap,
     cvd_divergence, dom_imbalance,
@@ -98,68 +98,6 @@ class SignalEngine:
     def __init__(self, market_data: MarketDataManager):
         self.md = market_data
 
-    # ─── VWAP Fade (mean reversion) ──────────────────────────
-    def _score_vwapfade(self, pair: str, cfg: Dict, result: SignalResult) -> SignalResult:
-        """Standalone mean-reversion rule — see config.VWAPFADE for the evidence.
-
-        Deliberately has NO trend/ADX/multi-TF gate: it fades stretched moves,
-        so the 7-layer trend machinery would filter out exactly the setups it
-        wants. total_score is reported as 7/7 on a fire purely so the existing
-        UI and the MIN_SIGNAL_SCORE plumbing keep working — it is a binary rule,
-        not a scored one.
-        """
-        candles = self.md.get_candles(pair, cfg["entry_tf"], closed_only=True)
-        if len(candles) < 30:
-            return result
-
-        closes  = [c["close"]  for c in candles]
-        highs   = [c["high"]   for c in candles]
-        lows    = [c["low"]    for c in candles]
-        volumes = [c["volume"] for c in candles]
-
-        atr_val = atr(highs, lows, closes, cfg["atr_period"])
-        price   = closes[-1]
-        if atr_val <= 0 or price <= 0:
-            return result
-        result.atr_value = round(atr_val, 6)
-
-        n_vwap = cfg["vwap_period"]
-        vw = vwap(highs[-n_vwap:], lows[-n_vwap:], closes[-n_vwap:], volumes[-n_vwap:])
-        if vw <= 0:
-            return result
-        dev = (price - vw) / vw
-        result.vwap_value   = round(vw, 6)
-        result.vwap_dev_pct = round(dev * 100, 4)
-
-        rsi_val = rsi(closes, cfg["rsi_period"])
-        result.rsi2_value = rsi_val
-
-        direction = None
-        if dev <= -cfg["vwap_dev_pct"] and rsi_val < cfg["rsi_long"]:
-            direction = "long"
-        elif dev >= cfg["vwap_dev_pct"] and rsi_val > cfg["rsi_short"]:
-            direction = "short"
-        if not direction:
-            return result
-
-        # Fee gate — same shape as the scalping path: a stop this tight makes
-        # the round-trip fee too large a share of 1R to be worth taking.
-        sl_pct = (atr_val * cfg["atr_sl_mult"]) / price
-        if sl_pct < cfg["min_sl_pct"]:
-            log.debug(f"{pair}: vwapfade skipped — sl_dist {sl_pct*100:.2f}% "
-                      f"below {cfg['min_sl_pct']*100:.2f}% gate")
-            return result
-
-        result.signal_direction = direction
-        result.trend_direction  = direction
-        result.vwap_deviation   = 1
-        result.rsi2_extreme     = 1
-        result.total_score      = 7      # binary rule — see docstring
-        result.trade_signal     = True
-        log.info(f"{pair}: VWAP FADE {direction.upper()} — dev={dev*100:+.2f}% "
-                 f"RSI5={rsi_val:.1f} slDist={sl_pct*100:.2f}%")
-        return result
-
     def score(self, pair: str, style: str, btc_direction: str = None) -> SignalResult:
         cfg = style_cfg(style)
         result = SignalResult()
@@ -167,9 +105,6 @@ class SignalEngine:
 
         if not self.md.is_ready(pair, style):
             return result
-
-        if style == "vwapfade":
-            return self._score_vwapfade(pair, cfg, result)
 
         # closed_only=True → drop the still-forming candle so all indicators
         # (ATR, VWAP, RSI, sweeps, FVG) are computed on completed candles only.
