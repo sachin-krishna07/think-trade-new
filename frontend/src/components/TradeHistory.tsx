@@ -27,6 +27,7 @@ interface Trade {
   exit_time: string;
   duration_seconds: number;
   trader_name: string;
+  is_shadow: boolean;
 }
 
 interface Props {
@@ -241,15 +242,29 @@ export default function TradeHistory({ mode }: Props) {
                       const pnl    = t.pnl    ?? 0;
                       const netPnl = t.net_pnl ?? pnl;
                       const win    = pnl >= 0;
+                      const shadow = t.is_shadow === true;
                       return (
                         <tr key={t.id}
-                          className="border-b border-[#1a2030] hover:bg-[#1a2030] transition-colors">
+                          className={`border-b border-[#1a2030] hover:bg-[#1a2030] transition-colors ${
+                            shadow ? "opacity-60" : ""
+                          }`}>
                           <td className="px-4 py-2.5">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
                               {t.trader_name || "Unknown"}
                             </span>
                           </td>
-                          <td className="px-4 py-2.5 font-bold text-white">{t.pair}</td>
+                          <td className="px-4 py-2.5 font-bold text-white whitespace-nowrap">
+                            {t.pair}
+                            {shadow && (
+                              <span
+                                title="Shadow trade — SL wider than 2.5% of position. Recorded for analysis only; not counted in wallet, stats or risk limits."
+                                className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide
+                                           bg-amber-500/15 border border-amber-500/40 text-amber-300 align-middle"
+                              >
+                                Shadow
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-2.5">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                               t.direction === "long"

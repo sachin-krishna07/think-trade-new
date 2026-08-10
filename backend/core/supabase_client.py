@@ -88,6 +88,10 @@ def reset_daily_pnl(mode: str) -> None:
 # ─── Trades ─────────────────────────────────────────────────
 
 def open_trade(trade_data: Dict) -> str:
+    # is_shadow is deliberately NOT optional. If the column is missing it must not
+    # be stripped like the others — a stripped flag would file a shadow trade as a
+    # real one and let its PnL through into the wallet, which is the exact outcome
+    # the flag exists to prevent. Fail loudly instead.
     _OPTIONAL_COLS = {"signal_score"}
     data = trade_data
     for attempt in range(len(_OPTIONAL_COLS) + 1):
@@ -95,6 +99,13 @@ def open_trade(trade_data: Dict) -> str:
             result = _db_call(lambda d: get_client().table("trades").insert(d).execute(), data)
             return result.data[0]["id"] if result.data else None
         except Exception as e:
+            if "is_shadow" in str(e):
+                log.error(
+                    "trades.is_shadow column is missing — run "
+                    "supabase_migration_shadow.sql in the Supabase SQL Editor before "
+                    "starting the bot. Refusing to insert without it."
+                )
+                raise
             missing = next((c for c in _OPTIONAL_COLS if c in str(e) and c in data), None)
             if missing:
                 data = {k: v for k, v in data.items() if k != missing}
@@ -145,7 +156,8 @@ def get_closed_for_adaptive(mode: str, trader_name: str = "", limit: int = 600) 
     q = get_client().table("trades")\
         .select("pair,net_pnl,risk_amount,exit_time")\
         .eq("mode", mode)\
-        .eq("status", "closed")
+        .eq("status", "closed")\
+        .eq("is_shadow", False)
     if trader_name:
         q = q.eq("trader_name", trader_name)
     result = q.order("exit_time", desc=True).limit(limit).execute()
@@ -158,6 +170,7 @@ def count_consecutive_losses(mode: str) -> int:
         .select("pnl")\
         .eq("mode", mode)\
         .eq("status", "closed")\
+        .eq("is_shadow", False)\
         .order("exit_time", desc=True)\
         .limit(10)\
         .execute()
@@ -175,6 +188,7 @@ def count_losses_in_window(mode: str, window: int = 5) -> int:
         .select("pnl")\
         .eq("mode", mode)\
         .eq("status", "closed")\
+        .eq("is_shadow", False)\
         .order("exit_time", desc=True)\
         .limit(window)\
         .execute()
@@ -185,6 +199,7 @@ def get_total_pnl(mode: str) -> float:
         .select("net_pnl")\
         .eq("mode", mode)\
         .eq("status", "closed")\
+        .eq("is_shadow", False)\
         .execute()
     return sum(r["net_pnl"] for r in (result.data or []) if r["net_pnl"] is not None)
 
@@ -194,6 +209,7 @@ def get_today_pnl(mode: str) -> float:
         .select("pnl")\
         .eq("mode", mode)\
         .eq("status", "closed")\
+        .eq("is_shadow", False)\
         .gte("exit_time", ist_start)\
         .execute()
     return sum(r["pnl"] for r in (result.data or []) if r["pnl"] is not None)
@@ -273,6 +289,9 @@ def get_all_active_positions(mode: str) -> list:
                 "risk_amount":       trade["risk_amount"],
                 "quantity":          trade["quantity"],
                 "fee":               trade.get("fee", 0),
+                # Must survive the restart — without it a recovered shadow trade
+                # would close as a real one and land in the wallet.
+                "is_shadow":         trade.get("is_shadow", False),
             })
         return enriched
     except Exception as e:
@@ -332,6 +351,7 @@ def upsert_performance(mode: str) -> None:
         .select("pnl, r_multiple")\
         .eq("mode", mode)\
         .eq("status", "closed")\
+        .eq("is_shadow", False)\
         .gte("exit_time", ist_start)\
         .execute()
     rows = trades_result.data or []

@@ -35,7 +35,9 @@ export default function PerfStats({ mode }: Props) {
   const { fmtINR } = useExchangeRate();
 
   const fetchTrades = async () => {
-    // IST midnight in UTC — filter by created_at (same as equity curve & heatmap)
+    // IST midnight in UTC. Filtered on exit_time — P&L belongs to the day the
+    // trade closed. The equity curve, heatmap and daily breakdown key off the
+    // same field (Analytics.tsx `dayOf`), as does the backend performance table.
     const istMidnight = new Date(
       new Date(Date.now() + IST_OFFSET).toISOString().slice(0, 10) + "T00:00:00+05:30"
     ).toISOString();
@@ -45,6 +47,7 @@ export default function PerfStats({ mode }: Props) {
       .select("pnl, net_pnl, r_multiple, exit_time")
       .eq("mode", mode)
       .eq("status", "closed")
+      .eq("is_shadow", false)   // shadow trades never move the day's numbers
       .gte("exit_time", istMidnight);
 
     setTrades((data as Trade[]) || []);

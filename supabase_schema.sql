@@ -63,11 +63,16 @@ CREATE TABLE trades (
   exit_reason       TEXT,
   signals_at_entry  JSONB,
   capital_pct       DECIMAL(5,2),
+  -- Shadow trade: SL wider than MAX_SL_PCT of position size. Fully recorded for
+  -- later study, but excluded from wallet, stats and risk counters, and never
+  -- sent to the exchange. See supabase_migration_shadow.sql.
+  is_shadow         BOOLEAN NOT NULL DEFAULT FALSE,
   entry_time        TIMESTAMPTZ DEFAULT NOW(),
   exit_time         TIMESTAMPTZ,
   duration_seconds  INTEGER,
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX trades_shadow_idx ON trades (mode, status, is_shadow);
 
 -- ─── Open Position ──────────────────────────────────────────
 CREATE TABLE positions (

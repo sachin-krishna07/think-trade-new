@@ -37,9 +37,19 @@ interface Trade {
   direction: string;
   exit_reason: string;
   created_at: string;
+  exit_time: string;
   style: string;
   signal_score: number;
 }
+
+// P&L belongs to the day the trade CLOSED, not the day it opened — a position
+// held across IST midnight is realised on the later date. The backend's
+// performance table and PerfStats both key off exit_time; the charts below used
+// created_at, which put every midnight-straddling trade on the wrong day (seen
+// 2026-08-10: MMT opened 23:45 / closed 00:29, so "Today's Performance" showed
+// 7 trades / +$7,622 while the daily breakdown showed 6 / +$6,532).
+// Entry-time analysis (the hour-of-day chart) still uses created_at by design.
+const dayOf = (t: Trade) => t.exit_time || t.created_at;
 
 function winRate(wins: number, total: number) {
   return total > 0 ? Math.round((wins / total) * 100) : 0;
@@ -120,9 +130,12 @@ export default function Analytics() {
     setLoading(true);
     let query = supabase
       .from("trades")
-      .select("pnl, net_pnl, r_multiple, fee, signals_at_entry, pair, direction, exit_reason, created_at, style, signal_score")
+      .select("pnl, net_pnl, r_multiple, fee, signals_at_entry, pair, direction, exit_reason, created_at, exit_time, style, signal_score")
       .eq("mode", m).eq("status", "closed")
-      .order("created_at", { ascending: true })
+      .eq("is_shadow", false)   // analytics measure the funded strategy only
+      // ordered by realisation so the cumulative equity curve steps in the order
+      // the money actually landed
+      .order("exit_time", { ascending: true })
       .limit(2000);
     if (traderFilter) query = query.eq("trader_name", traderFilter);
     const { data } = await query;
@@ -320,9 +333,9 @@ export default function Analytics() {
     // Group trades by IST date → daily net PnL
     const dayMap: Record<string, number> = {};
     trades.forEach(t => {
-      if (!t.created_at) return;
+      if (!dayOf(t)) return;
       // Convert UTC timestamp to IST date
-      const day = new Date(new Date(t.created_at).getTime() + IST_OFFSET)
+      const day = new Date(new Date(dayOf(t)).getTime() + IST_OFFSET)
         .toISOString().slice(0, 10);
       dayMap[day] = (dayMap[day] || 0) + (t.net_pnl || t.pnl || 0);
     });
@@ -380,8 +393,8 @@ export default function Analytics() {
   const dailyStats = useMemo(() => {
     const dayMap: Record<string, { total: number; wins: number; losses: number; pnl: number; rSum: number }> = {};
     trades.forEach(t => {
-      if (!t.created_at) return;
-      const day = new Date(new Date(t.created_at).getTime() + IST_OFFSET)
+      if (!dayOf(t)) return;
+      const day = new Date(new Date(dayOf(t)).getTime() + IST_OFFSET)
         .toISOString().slice(0, 10);
       if (!dayMap[day]) dayMap[day] = { total: 0, wins: 0, losses: 0, pnl: 0, rSum: 0 };
       dayMap[day].total++;
@@ -417,7 +430,7 @@ export default function Analytics() {
     const startMs = getStart();
 
     const filtered = days || equityPeriod === "1D"
-      ? trades.filter(t => new Date(t.created_at).getTime() >= startMs)
+      ? trades.filter(t => new Date(dayOf(t)).getTime() >= startMs)
       : trades;
     let running = 0;
     return filtered.map((t, i) => {

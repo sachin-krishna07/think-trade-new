@@ -198,6 +198,23 @@ MAX_LEVERAGE             = 20.0  # hard ceiling — user can never go above this
 DEFAULT_LEVERAGE         = 5.0   # default if user doesn't specify
 MIN_SIGNAL_SCORE         = 4    # minimum layers out of 7
 
+# Shadow-trade threshold — max SL distance as a fraction of position size.
+# SL% is exactly risk_amount / position_size_usd, so this caps "how much of the
+# money in the market can one trade lose".
+#
+# Added 2026-08-10 from a 19-trade DB review: 17 trades sat at 0.56-2.78% SL,
+# but two TST shorts ran 3.91% and 6.26% and lost -$6,416 and -$9,260 — together
+# more than the account's entire -$12,208 drawdown. Position size never looks at
+# ATR, so a volatile pair's wide ATR-derived SL scales the dollar loss with
+# nothing to stop it (no max_sl / risk cap existed anywhere in the codebase).
+#
+# Trades above this threshold are NOT skipped — they are taken as "shadow"
+# trades: fully recorded with their natural (wide) SL so the data stays honest,
+# but excluded from wallet, stats, and every risk counter. Once enough shadow
+# trades accumulate, this threshold can be re-tuned on real evidence instead of
+# the two data points available today.
+MAX_SL_PCT = 0.025   # 2.5%
+
 # ─── Adaptive Per-Pair Filter ───────────────────────────────
 # Learns from this bot's OWN closed trades: keeps a rolling window of the last
 # ADAPTIVE_K net-R results per pair and blocks new entries on pairs whose recent

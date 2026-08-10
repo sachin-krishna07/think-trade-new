@@ -6,6 +6,7 @@ from config import (
     MAX_DAILY_LOSS_PCT, MAX_WEEKLY_DRAWDOWN_PCT,
     MAX_TRADES_NORMAL,
     MAX_LEVERAGE, DEFAULT_LEVERAGE,
+    MAX_SL_PCT,
 )
 import core.supabase_client as db
 
@@ -108,7 +109,19 @@ class RiskManager:
         sl_distance_pct = sl_distance / entry_price if entry_price > 0 else 0.005
         risk_amount     = position_size_usd * sl_distance_pct
 
+        # Over MAX_SL_PCT this trade risks more of its own position size than the
+        # threshold allows. The SL is deliberately left at its full ATR distance —
+        # narrowing it would make the recorded outcome fictional, and the whole
+        # point of a shadow trade is to log what really would have happened.
+        is_shadow = sl_distance_pct > MAX_SL_PCT
+
         log.info(f"Position: {capital_pct}% × {leverage}x = ${position_size_usd:.2f} | SL risk ~${risk_amount:.2f}")
+        if is_shadow:
+            log.warning(
+                f"👻 SHADOW: SL {sl_distance_pct*100:.2f}% of position exceeds "
+                f"{MAX_SL_PCT*100:.2f}% cap (${risk_amount:.2f} at risk) — trade will "
+                f"be recorded but excluded from wallet, stats and risk counters"
+            )
 
         return {
             "risk_amount":       round(risk_amount, 4),
@@ -117,4 +130,5 @@ class RiskManager:
             "leverage":          round(leverage, 2),
             "sl_distance":       round(sl_distance, 6),
             "sl_distance_pct":   round(sl_distance_pct, 6),
+            "is_shadow":         is_shadow,
         }

@@ -50,7 +50,8 @@ export default function LayerStats({ mode }: Props) {
       .from("trades")
       .select("pnl, r_multiple, signals_at_entry")
       .eq("mode", mode)
-      .eq("status", "closed");
+      .eq("status", "closed")
+      .eq("is_shadow", false);   // shadow trades are recorded, never scored
 
     if (!data) return;
 

@@ -178,6 +178,7 @@ export default function Home() {
         .select("net_pnl, pnl, fee")
         .eq("mode", selectedMode)
         .eq("status", "closed")
+        .eq("is_shadow", false)   // equity curve tracks real money only
         .order("created_at", { ascending: true })
         .limit(2000);
 

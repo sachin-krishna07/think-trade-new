@@ -493,6 +493,11 @@ class TradeEngine:
             self._entry_fail_cooldown[pair] = time.time()
             return False
 
+        # Shadow trade: SL is wider than MAX_SL_PCT of the position. Recorded in
+        # full so the setup can be studied later, but it must not touch real
+        # money or any counter the live strategy depends on.
+        is_shadow = sizing.get("is_shadow", False)
+
         trade_data = {
             "mode":              self.mode,
             "pair":              pair,
@@ -511,6 +516,7 @@ class TradeEngine:
             "fee":               round(entry_fee, 4),
             "signal_score":      signal_score,
             "trader_name":       self.trader_name,
+            "is_shadow":         is_shadow,
         }
 
         trade_id = await asyncio.to_thread(db.open_trade, trade_data)
@@ -519,7 +525,10 @@ class TradeEngine:
             return False
 
         # ── Live: Place actual Binance Futures order ──────────
-        if self.mode == "live" and self._binance:
+        # Shadow trades never reach the exchange. Their PnL is excluded from the
+        # wallet, so placing a real order would put money at risk that nothing
+        # accounts for — the one combination that must never happen.
+        if self.mode == "live" and self._binance and not is_shadow:
             symbol = pair + "USDT" if not pair.endswith("USDT") else pair
 
             try:
@@ -605,8 +614,10 @@ class TradeEngine:
             self._open[pair] = []
         self._open[pair].append(entry)
 
-        log.info(f"TRADE OPENED: {direction.upper()} {pair} @ {entry_price:.4f} | "
-                 f"SL:{sl_price:.4f} TP:{tp_price:.4f} | ${sizing['risk_amount']:.2f} risk")
+        log.info(f"{'👻 SHADOW OPENED' if is_shadow else 'TRADE OPENED'}: "
+                 f"{direction.upper()} {pair} @ {entry_price:.4f} | "
+                 f"SL:{sl_price:.4f} ({sizing['sl_distance_pct']*100:.2f}%) "
+                 f"TP:{tp_price:.4f} | ${sizing['risk_amount']:.2f} risk")
 
         await self.on_update({
             "type": "trade_opened",
@@ -618,6 +629,7 @@ class TradeEngine:
                 "tp":        tp_price,
                 "size_usd":  sizing["position_size_usd"],
                 "risk_usd":  sizing["risk_amount"],
+                "is_shadow": is_shadow,
             }
         })
         return True
@@ -792,8 +804,11 @@ class TradeEngine:
             self._sl_cooldown[pair] = time.time()
             log.info(f"{pair}: post-exit cooldown started ({reason.upper()}) — no re-entry for 20 min")
 
+        is_shadow = pos_snapshot.get("is_shadow", False)
+
         # ── Live: Close position on Binance ──────────────────
-        if self.mode == "live" and self._binance:
+        # Nothing was ever opened on the exchange for a shadow trade.
+        if self.mode == "live" and self._binance and not is_shadow:
             symbol = pair + "USDT" if not pair.endswith("USDT") else pair
             try:
                 await self._binance.cancel_all_orders(symbol)
@@ -829,25 +844,34 @@ class TradeEngine:
         )
         await asyncio.to_thread(db.close_position, position_id)
 
-        # Wallet — always recalculate from DB to stay accurate
-        self._total_pnl = await asyncio.to_thread(db.get_total_pnl, self.mode)
-        self._daily_pnl = await asyncio.to_thread(db.get_today_pnl, self.mode)
-        self._balance   = self._initial_balance + self._total_pnl
-        await asyncio.to_thread(
-            db.update_wallet, self.mode, self._balance,
-            self._total_pnl, self._initial_balance, self._daily_pnl
-        )
-        await asyncio.to_thread(db.upsert_performance, self.mode)
+        # A shadow trade's result is written to `trades` and stops there. It never
+        # moves the wallet, never feeds the loss-streak counter, and never teaches
+        # the adaptive filter — otherwise a setup the strategy deliberately refused
+        # to fund would still be steering it. The DB helpers below already exclude
+        # is_shadow rows, so the wallet stays correct without special-casing here;
+        # skipping the calls outright just avoids pointless round-trips.
+        if not is_shadow:
+            # Wallet — always recalculate from DB to stay accurate
+            self._total_pnl = await asyncio.to_thread(db.get_total_pnl, self.mode)
+            self._daily_pnl = await asyncio.to_thread(db.get_today_pnl, self.mode)
+            self._balance   = self._initial_balance + self._total_pnl
+            await asyncio.to_thread(
+                db.update_wallet, self.mode, self._balance,
+                self._total_pnl, self._initial_balance, self._daily_pnl
+            )
+            await asyncio.to_thread(db.upsert_performance, self.mode)
 
-        self.risk.record_trade_result(pnl, self.mode)
+            self.risk.record_trade_result(pnl, self.mode)
 
-        # Feed the adaptive filter. Uses NET R (after both fees) — fees run ~0.16R
-        # per trade here, so gross r_multiple would make every pair look better
-        # than it is. Recorded only now, at close, which keeps the filter causal.
-        net_r = net_pnl / risk_amount if risk_amount > 0 else None
-        self.adaptive.record(pair, net_r)
+            # Feed the adaptive filter. Uses NET R (after both fees) — fees run ~0.16R
+            # per trade here, so gross r_multiple would make every pair look better
+            # than it is. Recorded only now, at close, which keeps the filter causal.
+            net_r = net_pnl / risk_amount if risk_amount > 0 else None
+            self.adaptive.record(pair, net_r)
 
-        log.info(f"TRADE CLOSED: {pair} | {reason.upper()} | PnL=${pnl:.2f} ({pnl_pct*100:.2f}%) | R={r_multiple:.2f}")
+        log.info(f"{'👻 SHADOW CLOSED' if is_shadow else 'TRADE CLOSED'}: {pair} | "
+                 f"{reason.upper()} | PnL=${pnl:.2f} ({pnl_pct*100:.2f}%) | R={r_multiple:.2f}"
+                 f"{' — not counted in wallet/stats' if is_shadow else ''}")
 
         await self.on_update({
             "type": "trade_closed",
@@ -860,6 +884,7 @@ class TradeEngine:
                 "reason":    reason,
                 "balance":   round(self._balance, 4),
                 "total_pnl": round(self._total_pnl, 4),
+                "is_shadow": is_shadow,
             }
         })
 
@@ -906,6 +931,7 @@ class TradeEngine:
                     "quantity":          p["quantity"],
                     "fee":               p.get("fee", 0),
                     "mode":              self.mode,
+                    "is_shadow":         p.get("is_shadow", False),
                     "_entry_time":       datetime.now(timezone.utc),  # approximate from now
                 }
                 trade_id    = p["trade_id"]
@@ -1195,7 +1221,14 @@ class TradeEngine:
         return len(self._open.get(pair, []))
 
     def total_open_positions(self) -> int:
-        return sum(len(v) for v in self._open.values())
+        """Real open trades only — this feeds the max-concurrent-trades gate, and
+        shadow trades must never consume one of those slots."""
+        return sum(
+            1
+            for entries in self._open.values()
+            for e in entries
+            if not e["pos"].get("is_shadow", False)
+        )
 
     def wallet_snapshot(self) -> Dict:
         return {
