@@ -297,7 +297,7 @@ class BotController:
         while self._running:
             try:
                 wallet      = self._engine.wallet_snapshot() if self._engine else {}
-                risk_status = self._engine.risk.status() if self._engine else {}
+                risk_status = self._engine.risk.status(self._mode, self._trader_name) if self._engine else {}
                 await self._broadcast({
                     "type": "wallet_update",
                     "data": {**wallet, "risk_status": risk_status},

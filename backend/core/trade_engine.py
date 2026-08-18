@@ -416,7 +416,7 @@ class TradeEngine:
             log.error(f"Wallet not found for mode={self.mode} — run supabase_schema.sql in Supabase SQL Editor!")
             return False
 
-        allowed, reason = self.risk.check(self.mode, wallet)
+        allowed, reason = self.risk.check(self.mode, wallet, self.trader_name)
         if not allowed:
             log.info(f"Trade blocked — {reason}")
             return False

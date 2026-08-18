@@ -191,6 +191,18 @@ SWING = {
 MAX_DAILY_LOSS_PCT       = 100.0
 MAX_WEEKLY_DRAWDOWN_PCT  = 100.0
 
+# Per-trader daily loss-count lockout — added 2026-08-18 per user request.
+# Any 3 losing trades (pnl < 0, any amount) closed by the SAME trader_name on
+# the SAME IST calendar day blocks that trader's new entries for the rest of
+# that day (existing open positions are untouched; resets at IST midnight).
+# Losses do not need to be consecutive. Shadow trades never count — they
+# never touch the wallet and shouldn't gate real entries either.
+# Replaces the old CONSECUTIVE_LOSS_LIMIT (3-in-a-row -> 1hr cooldown) rule,
+# which this makes redundant: any 3-in-a-row is also 3-that-day, and this
+# rule fires at the same time or earlier while blocking for the whole day
+# instead of 1 hour.
+MAX_DAILY_LOSSES_PER_TRADER = 3
+
 # Max simultaneous trades
 MAX_TRADES_NORMAL = 7
 

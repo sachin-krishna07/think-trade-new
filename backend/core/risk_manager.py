@@ -1,12 +1,11 @@
 import logging
-import time
 from typing import Dict, Tuple
 
 from config import (
     MAX_DAILY_LOSS_PCT, MAX_WEEKLY_DRAWDOWN_PCT,
     MAX_TRADES_NORMAL,
     MAX_LEVERAGE, DEFAULT_LEVERAGE,
-    MAX_SL_PCT,
+    MAX_SL_PCT, MAX_DAILY_LOSSES_PER_TRADER,
 )
 import core.supabase_client as db
 
@@ -15,53 +14,39 @@ log = logging.getLogger("risk_manager")
 # Trade modes — loss-triggered mode switching removed, bot always trades at full capacity.
 MODE_NORMAL = "normal"
 
-# Consecutive-loss cooldown — added 2026-07-14 per user request: 3 losses in a row
-# (regardless of wins mixed in earlier) locks out new entries for 1 hour. Existing
-# open positions are untouched. Counter resets to 0 both when the cooldown triggers
-# and when it expires, so it's always a fresh streak — the cooldown never extends.
-CONSECUTIVE_LOSS_LIMIT = 3
-LOSS_COOLDOWN_SEC      = 3600
-
 
 class RiskManager:
     def __init__(self):
         self._trade_mode: str = MODE_NORMAL
-        self._consecutive_losses: int = 0
-        self._loss_cooldown_until: float = 0.0
 
     def reset(self):
         """Fresh start on bot restart."""
         self._trade_mode = MODE_NORMAL
-        self._consecutive_losses = 0
-        self._loss_cooldown_until = 0.0
         log.info("Risk manager reset — fresh start")
 
     def record_trade_result(self, pnl: float, mode: str):
-        """Called after every trade closes. Tracks consecutive losses and triggers
-        a 1-hour new-entry cooldown after CONSECUTIVE_LOSS_LIMIT losses in a row."""
+        """Called after every trade closes. Logging only — the per-trader daily
+        loss lockout (see check() below) reads losses straight from the DB via
+        count_today_losses(), so no in-memory counter needs to be kept here."""
         if pnl >= 0:
             log.info(f"✅ Trade closed in profit (pnl={pnl:.2f})")
-            self._consecutive_losses = 0
-            return
+        else:
+            log.info(f"❌ Trade closed in loss (pnl={pnl:.2f})")
 
-        log.info(f"❌ Trade closed in loss (pnl={pnl:.2f})")
-        self._consecutive_losses += 1
-
-        if self._consecutive_losses >= CONSECUTIVE_LOSS_LIMIT:
-            self._loss_cooldown_until = time.time() + LOSS_COOLDOWN_SEC
-            self._consecutive_losses = 0
-            log.warning(
-                f"🛑 {CONSECUTIVE_LOSS_LIMIT} consecutive losses — new entries locked "
-                f"for {LOSS_COOLDOWN_SEC // 60} min"
-            )
-
-    def check(self, mode: str, wallet: Dict) -> Tuple[bool, str]:
+    def check(self, mode: str, wallet: Dict, trader_name: str = "Unknown") -> Tuple[bool, str]:
         """Returns (allowed, reason). Called before every trade entry."""
-        # ── 1. Consecutive-loss cooldown ─────────────────────────
-        remaining = self._loss_cooldown_until - time.time()
-        if remaining > 0:
-            mins, secs = divmod(int(remaining), 60)
-            return False, f"Loss-streak cooldown active — {mins}m {secs}s remaining"
+        # ── 1. Per-trader daily loss-count lockout ────────────────
+        # Any MAX_DAILY_LOSSES_PER_TRADER losing trades (pnl < 0, any amount,
+        # not necessarily consecutive) closed by this trader today (IST) blocks
+        # this trader's new entries for the rest of the day. Shadow trades are
+        # excluded inside count_today_losses(). Scoped to trader_name so one
+        # trader's losses never block another trader sharing the same table.
+        losses_today = db.count_today_losses(mode, trader_name)
+        if losses_today >= MAX_DAILY_LOSSES_PER_TRADER:
+            return False, (
+                f"Daily loss limit hit for {trader_name}: {losses_today} losing "
+                f"trades today (max {MAX_DAILY_LOSSES_PER_TRADER}) — resumes next day (IST)"
+            )
 
         # ── 3. Daily loss limit ──────────────────────────────────
         balance  = wallet.get("balance", 0)
@@ -85,17 +70,17 @@ class RiskManager:
         always full capacity."""
         return MAX_TRADES_NORMAL
 
-    def status(self) -> Dict:
-        """Snapshot for logging/broadcast."""
-        remaining = self._loss_cooldown_until - time.time()
-        active    = remaining > 0
+    def status(self, mode: str = "demo", trader_name: str = "Unknown") -> Dict:
+        """Snapshot for logging/broadcast. Includes today's per-trader loss count
+        so the frontend can show the daily lockout state (see check())."""
+        losses_today = db.count_today_losses(mode, trader_name)
+        blocked      = losses_today >= MAX_DAILY_LOSSES_PER_TRADER
         return {
-            "trade_mode":             self._trade_mode,
-            "max_trades":             self.max_trades(),
-            "cooldown_level":         1 if active else 0,
-            "cooldown_remaining_sec": int(remaining) if active else None,
-            "cooldown_total_min":     LOSS_COOLDOWN_SEC // 60 if active else None,
-            "consecutive_wins":       0,
+            "trade_mode":               self._trade_mode,
+            "max_trades":               self.max_trades(),
+            "daily_losses":             losses_today,
+            "max_daily_losses":         MAX_DAILY_LOSSES_PER_TRADER,
+            "daily_loss_block_active":  blocked,
         }
 
     def calculate_position(self, balance: float, capital_pct: float,

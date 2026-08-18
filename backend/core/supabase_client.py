@@ -214,6 +214,25 @@ def get_today_pnl(mode: str) -> float:
         .execute()
     return sum(r["pnl"] for r in (result.data or []) if r["pnl"] is not None)
 
+def count_today_losses(mode: str, trader_name: str) -> int:
+    """Count this trader's losing trades (pnl < 0, any amount) closed since IST
+    midnight today. Scoped to trader_name — the trades table is shared by more
+    than one bot instance, so an unscoped count would block the wrong trader.
+    Shadow trades are excluded (is_shadow=False) — they never touch the wallet
+    and must not gate real entries. Backs the daily per-trader loss lockout in
+    RiskManager.check() — see MAX_DAILY_LOSSES_PER_TRADER in config.py.
+    """
+    ist_start = _ist_today_utc_start()
+    result = get_client().table("trades")\
+        .select("pnl")\
+        .eq("mode", mode)\
+        .eq("trader_name", trader_name)\
+        .eq("status", "closed")\
+        .eq("is_shadow", False)\
+        .gte("exit_time", ist_start)\
+        .execute()
+    return sum(1 for r in (result.data or []) if r["pnl"] is not None and r["pnl"] < 0)
+
 
 # ─── Position ────────────────────────────────────────────────
 
