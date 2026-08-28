@@ -129,16 +129,18 @@ SCALPING = {
     "mtf_min_align":     4,               # ALL 4 TFs (1h/30m/15m/5m) must agree — no majority, full alignment required
     "atr_period":        14,
     "atr_sl_mult":       1.35,
-    "sl_entry_r":        1.0,   # changed 2026-07-26 from 2.5 → 1.0 per user request.
-                                 # SL-out now reports -1.00R.
-    "tp_entry_r":        2.5,   # changed 2026-07-26 from 3.5 → 2.5 per user request —
-                                 # this is now the hard-cap exit, not a plain TP.
-    # Continuous trailing stop: once peak R reaches trail_trigger_r, the stop
-    # becomes (peak_r - trail_gap_r) and re-tightens upward every tick as peak_r
-    # grows. Replaces the old single-shot breakeven lock (be_trigger_r/be_stop_r,
-    # removed 2026-07-26 per user request).
-    "trail_trigger_r":   1.1,
-    "trail_gap_r":       0.4,
+    "sl_entry_r":        1.2,   # 2.5 → 1.0 (2026-07-26) → 1.2 (backported from 3.0).
+                                 # SL-out reports -1.20R.
+    "tp_entry_r":        2.0,   # 3.5 → 2.5 (2026-07-26) → 2.0 (backported from 3.0) —
+                                 # hard-cap exit, not a plain TP.
+    # Trailing ladder: [(peak_r_trigger, stop_r), ...], lowest trigger first. The
+    # first time peak R touches a trigger, the stop jumps to that step's level.
+    # The stop only ever tightens — a later step can raise it, nothing lowers it —
+    # and it does NOT ratchet continuously between steps. Absent/empty = trailing
+    # off. Replaces the old scalar trail_trigger_r/trail_gap_r pair (backported
+    # from 3.0). A step's level may be NEGATIVE: (0.8, -0.5) is a loss cut on a
+    # trade that showed +0.8R and reversed, not a profit lock.
+    "trail_steps":       [(0.8, -0.5), (1.5, 1.0)],
     "atr_tp_mult":       20.0,  # effectively disabled — exits via trailing SL only
     "max_hold_sec":      None,  # disabled — exit only via SL / TP / trailing SL
     "min_adx":           22,              # raised from 20 on 2026-07-03 — DB analysis of 329 scalping
