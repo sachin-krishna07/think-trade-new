@@ -1,8 +1,10 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Set
 
-from config import SCALPING, SWING, SIGNAL_BROADCAST_INTERVAL, MIN_SIGNAL_SCORE
+from config import (SCALPING, SWING, SIGNAL_BROADCAST_INTERVAL, MIN_SIGNAL_SCORE,
+                    TRADE_WINDOW_START, TRADE_WINDOW_END)
 from core.market_data import MarketDataManager
 from core.signal_engine import SignalEngine
 from core.risk_manager import RiskManager
@@ -32,6 +34,14 @@ class BotController:
 
         # Last signal per pair (in-memory cache)
         self._last_signals: Dict[str, Dict] = {}
+
+        # Night-gate skip log dedupe: pair -> (direction, 5m bucket) last logged.
+        # The signal loop runs every 2s, so without this one blocked signal
+        # would be logged ~150 times per 5m candle.
+        self._gate_skip_logged: Dict[str, tuple] = {}
+
+        # EMA9-filter skip log dedupe — same shape and reason as above.
+        self._ema9_skip_logged: Dict[str, tuple] = {}
 
     # ─── Lifecycle ──────────────────────────────────────────
 
@@ -180,13 +190,58 @@ class BotController:
     def is_running(self) -> bool:
         return self._running
 
+    # ─── Trading Window ─────────────────────────────────────
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+    def _in_trade_window(self) -> bool:
+        """True when new entries are allowed (night gate added 2026-09-11).
+        Handles a window that crosses midnight (START > END) too, though the
+        current config's allowed window 01:00-18:00 does not need it."""
+        if TRADE_WINDOW_START is None or TRADE_WINDOW_END is None:
+            return True
+        now = datetime.now(self.IST)
+        t   = (now.hour, now.minute)
+        if TRADE_WINDOW_START <= TRADE_WINDOW_END:
+            return TRADE_WINDOW_START <= t < TRADE_WINDOW_END
+        return t >= TRADE_WINDOW_START or t < TRADE_WINDOW_END
+
+    @staticmethod
+    def _fmt_window() -> str:
+        return (f"{TRADE_WINDOW_START[0]:02d}:{TRADE_WINDOW_START[1]:02d}–"
+                f"{TRADE_WINDOW_END[0]:02d}:{TRADE_WINDOW_END[1]:02d} IST")
+
+    @staticmethod
+    def _fmt_blocked_window() -> str:
+        """The BLOCKED side of the window (END -> START), e.g. 18:00–01:00 IST —
+        what the logs name, since that is how the gate is described."""
+        return (f"{TRADE_WINDOW_END[0]:02d}:{TRADE_WINDOW_END[1]:02d}–"
+                f"{TRADE_WINDOW_START[0]:02d}:{TRADE_WINDOW_START[1]:02d} IST")
+
     # ─── Signal Loop ────────────────────────────────────────
 
     async def _signal_loop(self):
         warm_up_scans = 0          # skip entries for first 2 scans after restart
+        _outside_announced = False # log the window open/close once, not every scan
         while self._running:
             try:
-                await self._process_signals(allow_entry=warm_up_scans >= 2)
+                # Signals keep being scored and broadcast outside the window —
+                # only entries are gated, so the UI stays live all day.
+                in_window = self._in_trade_window()
+                if not in_window and not _outside_announced:
+                    log.warning(f"🌙 Night gate ON ({self._fmt_blocked_window()}) — "
+                                f"new entries paused; open positions unaffected")
+                    _outside_announced = True
+                elif in_window and _outside_announced:
+                    log.info(f"☀️ Night gate OFF — entries resumed "
+                             f"(trading window {self._fmt_window()})")
+                    _outside_announced = False
+                    self._gate_skip_logged.clear()
+
+                await self._process_signals(
+                    allow_entry=warm_up_scans >= 2 and in_window,
+                    gate_blocked=warm_up_scans >= 2 and not in_window,
+                )
                 if warm_up_scans < 2:
                     warm_up_scans += 1
                     log.info(f"Warm-up scan {warm_up_scans}/2 — entries paused (stale signal guard)")
@@ -197,7 +252,10 @@ class BotController:
                 log.error(f"Signal loop error: {e}", exc_info=True)
             await asyncio.sleep(SIGNAL_BROADCAST_INTERVAL)
 
-    async def _process_signals(self, allow_entry: bool = True):
+    async def _process_signals(self, allow_entry: bool = True, gate_blocked: bool = False):
+        """gate_blocked=True means entries are paused ONLY by the night gate
+        (warm-up already done) — a signal that would otherwise have been
+        entered is logged as skipped instead."""
         if not self._pairs:
             return
 
@@ -255,6 +313,32 @@ class BotController:
                     and open_count == 0
                     and not entered_this_cycle   # max 1 trade per scan cycle
                 )
+
+                if gate_blocked and result.trade_signal and open_count == 0:
+                    # Log once per pair per direction per 5m candle — the same
+                    # signal stays true for the whole candle.
+                    now_ist = datetime.now(self.IST)
+                    key = (result.signal_direction, int(now_ist.timestamp()) // 300)
+                    if self._gate_skip_logged.get(pair) != key:
+                        self._gate_skip_logged[pair] = key
+                        log.info(f"🌙 Night gate: {pair} {result.signal_direction.upper()} "
+                                 f"signal (score {score}/7) skipped @ "
+                                 f"{now_ist:%H:%M} IST price={self._md.get_price(pair)}")
+
+                if allow_entry and result.ema9_blocked and open_count == 0:
+                    # Signal passed every other check but the 1H EMA9 distance
+                    # gate (signal_engine). Logged once per pair per direction
+                    # per 5m candle; skipped during the night gate, which logs
+                    # on its own.
+                    now_ist = datetime.now(self.IST)
+                    key = (result.signal_direction, int(now_ist.timestamp()) // 300)
+                    if self._ema9_skip_logged.get(pair) != key:
+                        self._ema9_skip_logged[pair] = key
+                        min_dist = SCALPING.get("min_h1_ema9_dist_pct")
+                        log.info(f"📏 EMA9 filter: {pair} {result.signal_direction.upper()} "
+                                 f"signal (score {score}/7) skipped — 1H EMA9 distance "
+                                 f"{result.h1_ema9_dist_pct:.2f}% (need > {min_dist}%) @ "
+                                 f"{now_ist:%H:%M} IST price={self._md.get_price(pair)}")
 
                 if can_enter:
                     # Weak-combo half-sizing removed 2026-07-10 per user request —

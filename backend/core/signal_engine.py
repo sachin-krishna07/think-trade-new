@@ -58,6 +58,11 @@ class SignalResult:
         self.h1_rsi_state:    str   = "neutral"  # "overbought" | "oversold" | "neutral"
         self.h1_rsi_blocked:  bool  = False  # True = trade blocked by 1H RSI
 
+        # 1H EMA9 distance gate (internal — not in to_dict(), because to_dict()
+        # is upserted into the `signals` table, which has no column for these).
+        self.h1_ema9_dist_pct: float = 0.0   # % beyond 1H EMA9 in signal direction
+        self.ema9_blocked:     bool  = False # True = the ONLY thing stopping trade_signal
+
         # Quality gate results (internal — not sent to Supabase)
         self.btc_bias:         str  = "n/a"  # long | short | n/a
 
@@ -238,18 +243,14 @@ class SignalEngine:
                 else:
                     result.h1_rsi_state = "neutral"
 
-                # Block: overbought → no LONG | oversold → no SHORT
-                rsi_blocked = (
-                    (result.h1_rsi_state == "overbought" and direction == "long") or
-                    (result.h1_rsi_state == "oversold"   and direction == "short")
-                )
-                if rsi_blocked:
-                    result.h1_rsi_blocked   = True
-                    result.total_score      = score
-                    result.signal_direction = direction
-                    result.trade_signal     = False
-                    log.debug(f"{pair}: blocked by 1H RSI={h1_rsi_val:.1f} ({result.h1_rsi_state}) signal={direction}")
-                    return result
+                # Blocking disabled 2026-09-11 per user request. The value and
+                # state above are still computed and published (UI keeps its
+                # OB/OS chip), but an extreme 1H RSI no longer cancels the signal.
+                # The old early-return also skipped layers 2-7, so any pair it
+                # blocked was reported as 1/7 instead of its real score —
+                # removing it makes total_score honest again.
+                # h1_rsi_blocked stays False; the 1H trend bias gate below is
+                # untouched and still applies.
 
                 # ── 1H Trend Bias check ───────────────────────
                 if h1_adx >= 20:
@@ -365,9 +366,28 @@ class SignalEngine:
         pullback_ok = ema_pullback(e_closes, direction, period=9, tolerance_pct=0.0075)
         result.ema_pullback = 1 if pullback_ok else 0
 
-        if score >= MIN_SIGNAL_SCORE and quality_ok and pullback_ok:
+        # ── 1H EMA9 distance gate (added 2026-09-11 per user request) ──
+        # Signal must be > min_h1_ema9_dist_pct % beyond the 1H EMA9 in the
+        # signal direction. result.ema9 is the EMA9 of confirm_tfs[0]; the gate
+        # only runs when that TF is "1h", so a config change can't silently turn
+        # it into a different-timeframe filter. See config.SCALPING.
+        ema9_ok  = True
+        min_dist = cfg.get("min_h1_ema9_dist_pct")
+        if (min_dist is not None and confirm_tfs and confirm_tfs[0] == "1h"
+                and result.ema9 > 0 and price > 0):
+            dist = (price - result.ema9) / price * 100
+            if direction == "short":
+                dist = -dist
+            result.h1_ema9_dist_pct = round(dist, 3)
+            ema9_ok = dist > min_dist
+
+        if score >= MIN_SIGNAL_SCORE and quality_ok and pullback_ok and ema9_ok:
             result.trade_signal = True
         else:
             result.trade_signal = False
+            # Flag only when every other check passed, so the skip log in
+            # bot_controller names the real reason.
+            result.ema9_blocked = (score >= MIN_SIGNAL_SCORE and quality_ok
+                                   and pullback_ok and not ema9_ok)
 
         return result

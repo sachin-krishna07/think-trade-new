@@ -157,6 +157,17 @@ SCALPING = {
     "sweep_threshold":   0.002,   # max spread between equal lows/highs to form a cluster
     "trend_candles":     100,
     "entry_candles":     100,
+    # 1H EMA9 distance gate — added 2026-09-11 per user request. A signal is
+    # traded only when price is MORE than this many % beyond the 1H EMA9 in the
+    # SIGNAL's direction (above it for a long signal, below it for a short
+    # signal): dist% = (price - 1H EMA9) / price * 100, sign flipped for short.
+    # Measured on the signal direction, not the executed direction, so it does
+    # not change meaning when the frontend "reverse" toggle is on.
+    # Version-2.0 history (day-time trades, 8 Aug-11 Sep) did NOT show a steady
+    # edge: dist > 3% went 68% WR / +7,191 on 8-27 Aug but 30% WR / -5,647 from
+    # 28 Aug. Review after 1-2 weeks. Set to None to disable the gate.
+    # Blocked signals are logged by bot_controller ("EMA9 filter: ... skipped").
+    "min_h1_ema9_dist_pct": 2.0,
 }
 
 def style_cfg(style: str) -> dict:
@@ -203,6 +214,11 @@ MAX_WEEKLY_DRAWDOWN_PCT  = 100.0
 # which this makes redundant: any 3-in-a-row is also 3-that-day, and this
 # rule fires at the same time or earlier while blocking for the whole day
 # instead of 1 hour.
+#
+# REMOVED 2026-09-11 per user request: RiskManager.check() no longer reads
+# this, so 3 losing trades in a day no longer block new entries. bot_logs
+# showed it firing almost every day 22 Aug-11 Sep. Constant kept only so old
+# references don't break.
 MAX_DAILY_LOSSES_PER_TRADER = 3
 
 # Max simultaneous trades
@@ -211,6 +227,22 @@ MAX_TRADES_NORMAL = 7
 MAX_LEVERAGE             = 20.0  # hard ceiling — user can never go above this
 DEFAULT_LEVERAGE         = 5.0   # default if user doesn't specify
 MIN_SIGNAL_SCORE         = 4    # minimum layers out of 7
+
+# ─── Trading Window (IST) ───────────────────────────────────
+# New entries are opened ONLY inside this window, as (hour, minute) in IST
+# (UTC+5:30). Set either side to None to disable the gate entirely.
+#
+# This blocks new entries only. Positions already open are untouched — they
+# run to their own SL/TP/trailing exit whatever the clock says.
+#
+# Added 2026-09-11 as a NIGHT GATE, per user request: no new entries
+# 6:00 PM - 1:00 AM IST. Values below are the ALLOWED window
+# (01:00 -> 18:00), so the blocked window is END -> START (18:00 -> 01:00).
+# The gate handles wrap-around, so a window crossing midnight works too.
+# Logs name the blocked window ("Night gate ON (18:00–01:00 IST)") and every
+# skipped signal (once per pair per 5m candle). See bot_controller.py.
+TRADE_WINDOW_START = (1, 0)     # 1:00 AM IST — entries allowed from here
+TRADE_WINDOW_END   = (18, 0)    # 6:00 PM IST — night gate starts here
 
 # Shadow-trade threshold — max SL distance as a fraction of position size.
 # SL% is exactly risk_amount / position_size_usd, so this caps "how much of the
@@ -227,7 +259,12 @@ MIN_SIGNAL_SCORE         = 4    # minimum layers out of 7
 # but excluded from wallet, stats, and every risk counter. Once enough shadow
 # trades accumulate, this threshold can be re-tuned on real evidence instead of
 # the two data points available today.
-MAX_SL_PCT = 0.025   # 2.5%
+#
+# Raised 2.5% -> 3.0% on 2026-09-11 per user request.
+# Measured against the 1R distance (atr * atr_sl_mult), NOT against the stop
+# actually placed — sl_entry_r is 1.2, so a pair sitting just under this cap
+# has its real stop ~3.6% away. See risk_manager.calculate_position.
+MAX_SL_PCT = 0.030   # 3.0%
 
 # ─── Adaptive Per-Pair Filter ───────────────────────────────
 # Learns from this bot's OWN closed trades: keeps a rolling window of the last

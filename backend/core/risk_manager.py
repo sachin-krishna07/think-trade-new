@@ -5,7 +5,7 @@ from config import (
     MAX_DAILY_LOSS_PCT, MAX_WEEKLY_DRAWDOWN_PCT,
     MAX_TRADES_NORMAL,
     MAX_LEVERAGE, DEFAULT_LEVERAGE,
-    MAX_SL_PCT, MAX_DAILY_LOSSES_PER_TRADER,
+    MAX_SL_PCT,
 )
 import core.supabase_client as db
 
@@ -25,9 +25,7 @@ class RiskManager:
         log.info("Risk manager reset — fresh start")
 
     def record_trade_result(self, pnl: float, mode: str):
-        """Called after every trade closes. Logging only — the per-trader daily
-        loss lockout (see check() below) reads losses straight from the DB via
-        count_today_losses(), so no in-memory counter needs to be kept here."""
+        """Called after every trade closes. Logging only."""
         if pnl >= 0:
             log.info(f"✅ Trade closed in profit (pnl={pnl:.2f})")
         else:
@@ -35,18 +33,9 @@ class RiskManager:
 
     def check(self, mode: str, wallet: Dict, trader_name: str = "Unknown") -> Tuple[bool, str]:
         """Returns (allowed, reason). Called before every trade entry."""
-        # ── 1. Per-trader daily loss-count lockout ────────────────
-        # Any MAX_DAILY_LOSSES_PER_TRADER losing trades (pnl < 0, any amount,
-        # not necessarily consecutive) closed by this trader today (IST) blocks
-        # this trader's new entries for the rest of the day. Shadow trades are
-        # excluded inside count_today_losses(). Scoped to trader_name so one
-        # trader's losses never block another trader sharing the same table.
-        losses_today = db.count_today_losses(mode, trader_name)
-        if losses_today >= MAX_DAILY_LOSSES_PER_TRADER:
-            return False, (
-                f"Daily loss limit hit for {trader_name}: {losses_today} losing "
-                f"trades today (max {MAX_DAILY_LOSSES_PER_TRADER}) — resumes next day (IST)"
-            )
+        # Per-trader daily loss-count lockout (added 2026-08-18) removed
+        # 2026-09-11 per user request — losing trades no longer block new
+        # entries for the rest of the day.
 
         # ── 3. Daily loss limit ──────────────────────────────────
         balance  = wallet.get("balance", 0)
@@ -71,16 +60,10 @@ class RiskManager:
         return MAX_TRADES_NORMAL
 
     def status(self, mode: str = "demo", trader_name: str = "Unknown") -> Dict:
-        """Snapshot for logging/broadcast. Includes today's per-trader loss count
-        so the frontend can show the daily lockout state (see check())."""
-        losses_today = db.count_today_losses(mode, trader_name)
-        blocked      = losses_today >= MAX_DAILY_LOSSES_PER_TRADER
+        """Snapshot for logging/broadcast."""
         return {
             "trade_mode":               self._trade_mode,
             "max_trades":               self.max_trades(),
-            "daily_losses":             losses_today,
-            "max_daily_losses":         MAX_DAILY_LOSSES_PER_TRADER,
-            "daily_loss_block_active":  blocked,
         }
 
     def calculate_position(self, balance: float, capital_pct: float,
